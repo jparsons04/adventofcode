@@ -1,8 +1,5 @@
 room = []
 guard_directions = ['^', '>', 'v', '<']
-guardRow = 0
-guardCol = 0
-guardDir = ''
 
 with open('day6-input.txt', 'r') as f:
     for line in f:
@@ -59,13 +56,16 @@ def check_rotate(guardRow, guardCol, guardDir):
     return guardDir
 
 
-if __name__ == "__main__":
+def find_guard():
     for row, rr in enumerate(room):
         for col, _ in enumerate(rr):
             if room[row][col] in guard_directions:
-                guardRow = row
-                guardCol = col
-                guardDir = room[row][col]
+                return row, col, room[row][col]
+
+
+if __name__ == "__main__":
+    # Get guard's starting position and mark it as visited
+    guardRow, guardCol, guardDir = find_guard()
 
     while guardDir != 'out':
         guardDir = check_rotate(guardRow, guardCol, guardDir)
