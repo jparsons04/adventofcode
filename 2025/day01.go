@@ -14,7 +14,6 @@ type instruction struct {
 }
 
 func main() {
-
 	path := filepath.Join("inputs/day01.txt")
 
 	f, err := os.OpenFile(path, os.O_RDONLY, os.ModePerm)
@@ -36,7 +35,6 @@ func main() {
 	}
 
 	dialValue := 50
-	zeroCount := 0
 	partOneZeroCount := 0
 	partTwoZeroCount := 0
 
@@ -70,6 +68,6 @@ func main() {
 		}
 	}
 
-	fmt.Printf("Part 1 zero count: %d\n", zeroCount+partOneZeroCount)
-	fmt.Printf("Part 2 zero count: %d\n", zeroCount+partTwoZeroCount)
+	fmt.Printf("Part 1 zero count: %d\n", partOneZeroCount)
+	fmt.Printf("Part 2 zero count: %d\n", partTwoZeroCount)
 }
