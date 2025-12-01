@@ -13,13 +13,9 @@ type instruction struct {
 	distance int
 }
 
-func instructionSplit(r rune) bool {
-	return r == 'L' || r == 'R'
-}
-
 func main() {
 
-	path := filepath.Join("./day1_input.txt")
+	path := filepath.Join("inputs/day01.txt")
 
 	f, err := os.OpenFile(path, os.O_RDONLY, os.ModePerm)
 	if err != nil {
@@ -41,11 +37,13 @@ func main() {
 
 	dialValue := 50
 	zeroCount := 0
+	partOneZeroCount := 0
+	partTwoZeroCount := 0
 
 	for _, v := range instructions {
 		dialStartsAtZero := dialValue == 0
 		// Part 2: Ticks into zero n times after n full rotations
-		zeroCount += v.distance / 100
+		partTwoZeroCount += v.distance / 100
 
 		switch v.dir {
 		case "L":
@@ -54,8 +52,11 @@ func main() {
 			dialValue += v.distance % 100
 		}
 
+		// Part 2: If the dial starts at zero on an iteration, zeroCount is covered
+		// by the full rotations before distance % 100, otherwise we cross or land
+		// on zero and the count needs to tick up
 		if !dialStartsAtZero && (dialValue == 0 || dialValue < 0 || dialValue >= 100) {
-			zeroCount++
+			partTwoZeroCount++
 		}
 
 		if dialValue < 0 {
@@ -64,11 +65,11 @@ func main() {
 			dialValue -= 100
 		}
 
-		// For Part 1
-		//if dialValue == 0 {
-		//	zeroCount++
-		//}
+		if dialValue == 0 {
+			partOneZeroCount++
+		}
 	}
 
-	fmt.Println(zeroCount)
+	fmt.Printf("Part 1 zero count: %d\n", zeroCount+partOneZeroCount)
+	fmt.Printf("Part 2 zero count: %d\n", zeroCount+partTwoZeroCount)
 }
