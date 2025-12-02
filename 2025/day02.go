@@ -10,12 +10,10 @@ import (
 
 func partOne(intFirst int, intSecond int) int {
 	invalidIDSum := 0
-	//fmt.Printf("First: %d, Second: %d\n", intFirst, intSecond)
 	for i := intFirst; i <= intSecond; i++ {
 		v := strings.TrimSpace(strconv.Itoa(i))
 
 		if v[:len(v)/2] == v[len(v)/2:] {
-			//fmt.Printf("Invalid ID found: %d\n", i)
 			invalidIDSum += i
 		}
 	}
@@ -30,19 +28,15 @@ func isInvalid(value string, seqToCheck string, seqLength int) bool {
 		}
 
 		if value[j:j+seqLength] != seqToCheck {
-			//fmt.Printf("Invalid not found: %v, len: %d\n", value, seqLength)
 			return false
 		}
 	}
-
-	//fmt.Printf("Invalid found: %v, len: %d\n", value, seqLength)
 
 	return true
 }
 
 func partTwo(intFirst int, intSecond int) int {
 	invalidIDSum := 0
-	//fmt.Printf("First: %d, Second: %d\n", intFirst, intSecond)
 	for i := intFirst; i <= intSecond; i++ {
 		v := strings.TrimSpace(strconv.Itoa(i))
 
