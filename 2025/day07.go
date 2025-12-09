@@ -2,68 +2,63 @@ package main
 
 import (
 	"bufio"
-	"container/list"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
+	"slices"
 )
 
-//type SplitterNode struct {
-//	Value                  int
-//	LeftNode               *SplitterNode
-//	RightNode              *SplitterNode
-//	FoundSplitterNodeLater bool
+//type SplitterPosition struct {
+//	Row                 int
+//	Col                 int
+//	CalculatedPathCount int
+//}
+//
+//type SplitterPositions []SplitterPosition
+//
+//func (sp SplitterPositions) countTimelines(row, col, bottomRow int) int {
+//	if row == bottomRow {
+//		return 1
+//	}
+//
+//	return sp.countTimelines(row-1, col-1) + sp.countTimelines(row+1, col+1)
 //}
 
-type SplitterNode struct {
-	Value                  int
-	Neighbors              []int
-	FoundSplitterNodeLater bool
+type Room map[int]map[int]rune
+
+type CalculatedPosition struct {
+	StartRow      int
+	StartCol      int
+	TimelineCount int
 }
 
-func bfs(splitterNodes map[int]*SplitterNode, root, target int) string {
+var calculatedPositions []CalculatedPosition
 
-	// check root node and target exist in the tree
-	rootNode, rootExists := splitterNodes[root]
-	_, targetExists := splitterNodes[target]
-	if !rootExists || !targetExists {
-		return ""
+func (r Room) countTimelines(row, col int) int {
+	pos := CalculatedPosition{StartRow: row, StartCol: col}
+	var count int
+
+	if row == len(r)-1 {
+		count++
 	}
 
-	q := list.New()
-	q.PushBack(rootNode)
+	if r[row][col] == '^' {
+		idx := slices.IndexFunc(calculatedPositions, func(cp CalculatedPosition) bool { return cp.StartRow == row && cp.StartCol == col })
 
-	parents := make(map[int]int)
-	parents[root] = -1
-
-	for q.Len() > 0 {
-		currentNode := q.Front().Value.(*SplitterNode)
-		q.Remove(q.Front())
-
-		if currentNode.Value == target {
-			fmt.Printf("currentNode at target: %+v\n", currentNode)
-			var route []string
-			for currentNode.Value > -1 {
-				route = append([]string{strconv.Itoa(currentNode.Value)}, route...)
-				currentNode.Value = parents[currentNode.Value]
-			}
-
-			return strings.Join(route, "-")
+		if idx != -1 {
+			count += calculatedPositions[idx].TimelineCount
+		} else {
+			count += r.countTimelines(row-1, col-1) + r.countTimelines(row+1, col+1)
 		}
-
-		for _, neighbor := range currentNode.Neighbors {
-			// Will not track visited
-			parents[neighbor] = currentNode.Value
-			q.PushBack(splitterNodes[neighbor])
-		}
-
-		fmt.Printf("parents: %+v\n", parents)
-
 	}
 
-	return ""
+	if r[row][col] == '.' || r[row][col] == 'S' {
+		count += r.countTimelines(row+1, col)
+	}
+
+	pos.TimelineCount = count
+
+	return count
 }
 
 func main() {
@@ -79,67 +74,51 @@ func main() {
 	sc := bufio.NewScanner(f)
 
 	tachyonBeamPositions := map[int]bool{}
-	splitterNodes := map[int]*SplitterNode{}
+	room := make(Room)
+	var startRow, startCol int
 	partOneSplitNum := 0
-	var start int
-	var destinations []int
 
+	row := 0
 	for sc.Scan() {
 		line := []rune(sc.Text())
 
-		var splitters []int
+		if _, ok := room[row]; !ok {
+			room[row] = map[int]rune{}
+		}
 
-		for i, rune := range line {
-			if rune == 'S' {
-				fmt.Printf("Found S: %d\n", i)
-				start = i
-				if _, ok := tachyonBeamPositions[i]; !ok {
-					tachyonBeamPositions[i] = true
-					splitterNodes[i] = &SplitterNode{Value: i}
+		for col, r := range line {
+			room[row][col] = r
+
+			if r == 'S' {
+				fmt.Printf("Found S: %d\n", col)
+				startRow = row
+				startCol = col
+				if _, ok := tachyonBeamPositions[col]; !ok {
+					tachyonBeamPositions[col] = true
 				}
 			}
 
-			if rune == '^' {
-				if _, ok := tachyonBeamPositions[i]; ok {
+			if r == '^' {
+				//splitterPositions = append(splitterPositions, SplitterPosition{Row: row, Col: col})
+				if _, ok := tachyonBeamPositions[col]; ok {
 					partOneSplitNum++
-					delete(tachyonBeamPositions, i)
+					delete(tachyonBeamPositions, col)
 
-					if _, ok := tachyonBeamPositions[i-1]; !ok {
-						tachyonBeamPositions[i-1] = true
+					if _, ok := tachyonBeamPositions[col-1]; !ok {
+						tachyonBeamPositions[col-1] = true
 					}
 
-					if _, ok := tachyonBeamPositions[i+1]; !ok {
-						tachyonBeamPositions[i+1] = true
+					if _, ok := tachyonBeamPositions[col+1]; !ok {
+						tachyonBeamPositions[col+1] = true
 					}
-
-					if _, ok := splitterNodes[i-1]; !ok {
-						splitterNodes[i-1] = &SplitterNode{Value: i}
-						splitterNodes[i].Neighbors = append(splitterNodes[i].Neighbors, i-1)
-						splitterNodes[i].FoundSplitterNodeLater = true
-					}
-
-					if _, ok := splitterNodes[i+1]; !ok {
-						splitterNodes[i+1] = &SplitterNode{Value: i}
-						splitterNodes[i].Neighbors = append(splitterNodes[i].Neighbors, i+1)
-						splitterNodes[i].FoundSplitterNodeLater = true
-					}
-
-					splitters = append(splitters, i)
 				}
 			}
 		}
 
-		if len(splitters) > 0 {
-			destinations = splitters
-		}
+		row++
 	}
 
-	fmt.Println(start)
-	fmt.Println(destinations)
-
-	bfs(splitterNodes, start, destinations[0])
-
-	partTwoTimelines := 0
+	partTwoTimelines := room.countTimelines(startRow, startCol)
 
 	fmt.Printf("Part one number of splits: %d\n", partOneSplitNum)
 	fmt.Printf("Part two number of timelines: %d\n", partTwoTimelines)
