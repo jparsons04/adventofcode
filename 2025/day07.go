@@ -5,50 +5,28 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 )
-
-//type SplitterPosition struct {
-//	Row                 int
-//	Col                 int
-//	CalculatedPathCount int
-//}
-//
-//type SplitterPositions []SplitterPosition
-//
-//func (sp SplitterPositions) countTimelines(row, col, bottomRow int) int {
-//	if row == bottomRow {
-//		return 1
-//	}
-//
-//	return sp.countTimelines(row-1, col-1) + sp.countTimelines(row+1, col+1)
-//}
 
 type Room map[int]map[int]rune
 
-type CalculatedPosition struct {
-	StartRow      int
-	StartCol      int
-	TimelineCount int
-}
-
-var calculatedPositions []CalculatedPosition
+var calculatedPositions = make(map[int]map[int]int)
 
 func (r Room) countTimelines(row, col int) int {
-	pos := CalculatedPosition{StartRow: row, StartCol: col}
+	if row == len(r)-1 {
+		return 1
+	}
+
 	var count int
 
-	if row == len(r)-1 {
-		count++
+	if _, ok := calculatedPositions[row]; !ok {
+		calculatedPositions[row] = make(map[int]int)
 	}
 
 	if r[row][col] == '^' {
-		idx := slices.IndexFunc(calculatedPositions, func(cp CalculatedPosition) bool { return cp.StartRow == row && cp.StartCol == col })
-
-		if idx != -1 {
-			count += calculatedPositions[idx].TimelineCount
+		if _, ok := calculatedPositions[row][col]; ok {
+			count += calculatedPositions[row][col]
 		} else {
-			count += r.countTimelines(row-1, col-1) + r.countTimelines(row+1, col+1)
+			count += r.countTimelines(row+1, col-1) + r.countTimelines(row+1, col+1)
 		}
 	}
 
@@ -56,8 +34,7 @@ func (r Room) countTimelines(row, col int) int {
 		count += r.countTimelines(row+1, col)
 	}
 
-	pos.TimelineCount = count
-
+	calculatedPositions[row][col] = count
 	return count
 }
 
@@ -90,7 +67,6 @@ func main() {
 			room[row][col] = r
 
 			if r == 'S' {
-				fmt.Printf("Found S: %d\n", col)
 				startRow = row
 				startCol = col
 				if _, ok := tachyonBeamPositions[col]; !ok {
