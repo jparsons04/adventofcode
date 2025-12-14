@@ -190,8 +190,19 @@ func main() {
 		return 0
 	})
 
+	// Filter out the smallest 25% of all rectangle candidates
+	maxAreaThreshold := largestArea * 0.25
+	filteredCandidates := make([]RectCandidate, 0)
+	for _, candidate := range rectCandidates {
+		if candidate.Area >= maxAreaThreshold {
+			filteredCandidates = append(filteredCandidates, candidate)
+		}
+	}
+
+	fmt.Printf("Total candidates: %d, Filtered to: %d (threshold: %.0f)\n", len(rectCandidates), len(filteredCandidates), maxAreaThreshold)
+
 	numWorkers := 12
-	candidateChan := make(chan RectCandidate, 100000)
+	candidateChan := make(chan RectCandidate, numWorkers)
 	resultChan := make(chan float64, numWorkers)
 	var wg sync.WaitGroup
 
@@ -212,8 +223,11 @@ func main() {
 
 	// Send candidates to workers
 	go func() {
-		for _, candidate := range rectCandidates {
+		for i, candidate := range filteredCandidates {
 			candidateChan <- candidate
+			if i%1000 == 0 {
+				fmt.Printf("Queued %d candidates...\n", i)
+			}
 		}
 		close(candidateChan)
 	}()
