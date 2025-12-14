@@ -28,10 +28,6 @@ type RectCandidate struct {
 	Area    float64
 }
 
-func getArea(tile1, tile2 TileCoord) float64 {
-	return (math.Abs(tile2.Col-tile1.Col) + 1) * (math.Abs(tile2.Row-tile1.Row) + 1)
-}
-
 func isOnBoundary(point TileCoord, redTiles []TileCoord, boundaries []LineSegment) bool {
 	if slices.Contains(redTiles, point) {
 		return true
@@ -76,6 +72,24 @@ func isInside(point TileCoord, boundaries []LineSegment) bool {
 	return intersections%2 == 1
 }
 
+func isValidRectangle(rect RectCandidate, tiles []TileCoord, boundaries []LineSegment) bool {
+	perimeter := generatePerimeter([]TileCoord{rect.Corner1, rect.Corner2})
+
+	for _, point := range perimeter {
+		if !isOnBoundary(point, tiles, boundaries) {
+			if !isInside(point, boundaries) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+func getArea(tile1, tile2 TileCoord) float64 {
+	return (math.Abs(tile2.Col-tile1.Col) + 1) * (math.Abs(tile2.Row-tile1.Row) + 1)
+}
+
 func generatePerimeter(corners []TileCoord) []TileCoord {
 	perimeter := make([]TileCoord, 0)
 
@@ -117,20 +131,6 @@ func buildBoundary(tiles []TileCoord) []LineSegment {
 	return segments
 }
 
-func isValidRectangle(rect RectCandidate, tiles []TileCoord, boundaries []LineSegment) bool {
-	perimeter := generatePerimeter([]TileCoord{rect.Corner1, rect.Corner2})
-
-	for _, point := range perimeter {
-		if !isOnBoundary(point, tiles, boundaries) {
-			if !isInside(point, boundaries) {
-				return false
-			}
-		}
-	}
-
-	return true
-}
-
 func main() {
 	path := filepath.Join("inputs/day09.txt")
 
@@ -170,6 +170,7 @@ func main() {
 			if tile1 != tile2 {
 				area := getArea(tile1, tile2)
 
+				// For Part 1
 				if area > largestArea {
 					largestArea = area
 				}
@@ -223,7 +224,7 @@ func main() {
 		close(resultChan)
 	}()
 
-	// Collect results
+	// Collect results for Part 2
 	for area := range resultChan {
 		if area > largestAreaInsideBoundaries {
 			largestAreaInsideBoundaries = area
