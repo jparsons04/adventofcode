@@ -194,12 +194,11 @@ func main() {
 
 	for sc.Scan() {
 		line := strings.Split(sc.Text(), ",")
-		pos := make([]int, len(line))
 		posFloat := make([]float64, len(line))
 
 		for i, v := range line {
-			pos[i], _ = strconv.Atoi(v)
-			posFloat[i] = float64(pos[i])
+			val, _ := strconv.Atoi(v)
+			posFloat[i] = float64(val)
 		}
 
 		junctionBoxPos := JunctionBoxPos{X: posFloat[0], Y: posFloat[1], Z: posFloat[2]}

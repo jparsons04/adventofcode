@@ -77,16 +77,10 @@ func main() {
 			ids := strings.Split(r, "-")
 
 			strFirst := strings.TrimSpace(ids[0])
-			intFirst, err := strconv.Atoi(strFirst)
-			if err != nil {
-				return
-			}
+			intFirst, _ := strconv.Atoi(strFirst)
 
 			strSecond := strings.TrimSpace(ids[1])
-			intSecond, err := strconv.Atoi(strSecond)
-			if err != nil {
-				return
-			}
+			intSecond, _ := strconv.Atoi(strSecond)
 
 			// invalid IDs must have even lengths in part one
 			if len(ids[0])%2 == 0 || len(ids[1])%2 == 0 {
