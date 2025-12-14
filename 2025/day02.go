@@ -1,8 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -57,38 +58,43 @@ func partTwo(intFirst int, intSecond int) int {
 
 func main() {
 	path := filepath.Join("inputs/day02.txt")
-
-	bytes, err := ioutil.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
-		return
+		panic(err)
 	}
 
-	contents := string(bytes)
-	ranges := strings.Split(contents, ",")
-	partOneSum := 0
-	partTwoSum := 0
+	defer f.Close()
 
-	for _, r := range ranges {
-		ids := strings.Split(r, "-")
+	sc := bufio.NewScanner(f)
 
-		strFirst := strings.TrimSpace(ids[0])
-		intFirst, err := strconv.Atoi(strFirst)
-		if err != nil {
-			return
+	var partOneSum, partTwoSum int
+
+	for sc.Scan() {
+		contents := sc.Text()
+		ranges := strings.Split(contents, ",")
+
+		for _, r := range ranges {
+			ids := strings.Split(r, "-")
+
+			strFirst := strings.TrimSpace(ids[0])
+			intFirst, err := strconv.Atoi(strFirst)
+			if err != nil {
+				return
+			}
+
+			strSecond := strings.TrimSpace(ids[1])
+			intSecond, err := strconv.Atoi(strSecond)
+			if err != nil {
+				return
+			}
+
+			// invalid IDs must have even lengths in part one
+			if len(ids[0])%2 == 0 || len(ids[1])%2 == 0 {
+				partOneSum += partOne(intFirst, intSecond)
+			}
+
+			partTwoSum += partTwo(intFirst, intSecond)
 		}
-
-		strSecond := strings.TrimSpace(ids[1])
-		intSecond, err := strconv.Atoi(strSecond)
-		if err != nil {
-			return
-		}
-
-		// invalid IDs must have even lengths in part one
-		if len(ids[0])%2 == 0 || len(ids[1])%2 == 0 {
-			partOneSum += partOne(intFirst, intSecond)
-		}
-
-		partTwoSum += partTwo(intFirst, intSecond)
 	}
 
 	fmt.Printf("partOneSum: %d\n", partOneSum)

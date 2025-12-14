@@ -180,8 +180,7 @@ func partTwo(junctionBoxPairs []JunctionBoxPair, nextJunctionBoxPair int, circui
 
 func main() {
 	path := filepath.Join("inputs/day08.txt")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, os.ModePerm)
+	f, err := os.Open(path)
 	if err != nil {
 		panic(err)
 	}

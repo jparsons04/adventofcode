@@ -59,16 +59,16 @@ func sweepRoomToRemovePaperRolls(grid [][]byte, remove bool) int {
 
 func main() {
 	path := filepath.Join("inputs/day04.txt")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, os.ModePerm)
+	f, err := os.Open(path)
 	if err != nil {
 		panic(err)
 	}
 
 	defer f.Close()
 
-	grid := make([][]byte, 0)
 	sc := bufio.NewScanner(f)
+
+	grid := make([][]byte, 0)
 
 	for sc.Scan() {
 		chars := []byte(sc.Text())

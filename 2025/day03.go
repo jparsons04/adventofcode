@@ -44,8 +44,7 @@ func turnOnBatteriesInBank(bank string, numBatteriesToFind int) int {
 
 func main() {
 	path := filepath.Join("inputs/day03.txt")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, os.ModePerm)
+	f, err := os.Open(path)
 	if err != nil {
 		panic(err)
 	}
@@ -54,8 +53,7 @@ func main() {
 
 	sc := bufio.NewScanner(f)
 
-	partOneTotalOutputJoltage := 0
-	partTwoTotalOutputJoltage := 0
+	var partOneTotalOutputJoltage, partTwoTotalOutputJoltage int
 
 	for sc.Scan() {
 		bank := sc.Text()

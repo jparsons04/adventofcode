@@ -35,8 +35,7 @@ func transposeRuneOperands(matrix [][]rune) [][]rune {
 
 func main() {
 	path := filepath.Join("inputs/day06.txt")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, os.ModePerm)
+	f, err := os.Open(path)
 	if err != nil {
 		panic(err)
 	}

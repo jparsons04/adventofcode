@@ -15,8 +15,7 @@ type instruction struct {
 
 func main() {
 	path := filepath.Join("inputs/day01.txt")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, os.ModePerm)
+	f, err := os.Open(path)
 	if err != nil {
 		panic(err)
 	}
@@ -24,6 +23,7 @@ func main() {
 	defer f.Close()
 
 	sc := bufio.NewScanner(f)
+
 	instructions := []instruction{}
 
 	for sc.Scan() {

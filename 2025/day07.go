@@ -40,8 +40,7 @@ func (r Room) countTimelines(row, col int) int {
 
 func main() {
 	path := filepath.Join("inputs/day07.txt")
-
-	f, err := os.OpenFile(path, os.O_RDONLY, os.ModePerm)
+	f, err := os.Open(path)
 	if err != nil {
 		panic(err)
 	}
@@ -53,9 +52,9 @@ func main() {
 	tachyonBeamPositions := map[int]bool{}
 	room := make(Room)
 	var startRow, startCol int
-	partOneSplitNum := 0
+	var partOneSplitNum int
+	var row int
 
-	row := 0
 	for sc.Scan() {
 		line := []rune(sc.Text())
 
