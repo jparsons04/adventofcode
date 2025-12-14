@@ -35,21 +35,33 @@ type BoundarySegment struct {
 	IsVertical                     bool
 }
 
+type SpatialIndex struct {
+	VerticalByCol     map[float64][]BoundarySegment // Vertical segments indexed by column
+	HorizontalByRow   map[float64][]BoundarySegment // Horizontal segments indexed by row
+	AllVerticalSegments []BoundarySegment             // Pre-filtered list of all vertical segments for ray casting
+}
+
 func isOnBoundary(
 	point TileCoord,
-	boundaries []BoundarySegment,
+	spatialIndex SpatialIndex,
 	redTileMap map[TileCoord]bool) bool {
 	if _, ok := redTileMap[point]; ok {
 		return true
 	}
 
-	for _, boundary := range boundaries {
-		if boundary.IsVertical {
-			if boundary.Segment.Start.Col == point.Col && boundary.MinRow <= point.Row && point.Row <= boundary.MaxRow {
+	// Check vertical segments at this column
+	if verticalSegs, ok := spatialIndex.VerticalByCol[point.Col]; ok {
+		for _, boundary := range verticalSegs {
+			if boundary.MinRow <= point.Row && point.Row <= boundary.MaxRow {
 				return true
 			}
-		} else {
-			if boundary.Segment.Start.Row == point.Row && boundary.MinCol <= point.Col && point.Col <= boundary.MaxCol {
+		}
+	}
+
+	// Check horizontal segments at this row
+	if horizontalSegs, ok := spatialIndex.HorizontalByRow[point.Row]; ok {
+		for _, boundary := range horizontalSegs {
+			if boundary.MinCol <= point.Col && point.Col <= boundary.MaxCol {
 				return true
 			}
 		}
@@ -58,15 +70,14 @@ func isOnBoundary(
 	return false
 }
 
-func isInside(point TileCoord, boundaries []BoundarySegment) bool {
+func isInside(point TileCoord, spatialIndex SpatialIndex) bool {
 	intersections := 0
-	for _, segment := range boundaries {
-		// Vertical line segments only
-		if segment.IsVertical {
-			segCol := segment.Segment.Start.Col
-			if segCol > point.Col && segment.MinRow <= point.Row && point.Row < segment.MaxRow {
-				intersections++
-			}
+
+	// Only check vertical segments to the right of the point
+	for _, segment := range spatialIndex.AllVerticalSegments {
+		segCol := segment.Segment.Start.Col
+		if segCol > point.Col && segment.MinRow <= point.Row && point.Row < segment.MaxRow {
+			intersections++
 		}
 	}
 
@@ -75,13 +86,13 @@ func isInside(point TileCoord, boundaries []BoundarySegment) bool {
 
 func isValidRectangle(
 	rect RectCandidate,
-	boundaries []BoundarySegment,
+	spatialIndex SpatialIndex,
 	redTileMap map[TileCoord]bool) bool {
 	perimeter := generatePerimeter([]TileCoord{rect.Corner1, rect.Corner2})
 
 	for _, point := range perimeter {
-		if !isOnBoundary(point, boundaries, redTileMap) {
-			if !isInside(point, boundaries) {
+		if !isOnBoundary(point, spatialIndex, redTileMap) {
+			if !isInside(point, spatialIndex) {
 				return false
 			}
 		}
@@ -142,6 +153,27 @@ func buildBoundary(tiles []TileCoord) []BoundarySegment {
 	return segments
 }
 
+func buildSpatialIndex(boundaries []BoundarySegment) SpatialIndex {
+	index := SpatialIndex{
+		VerticalByCol:     make(map[float64][]BoundarySegment),
+		HorizontalByRow:   make(map[float64][]BoundarySegment),
+		AllVerticalSegments: make([]BoundarySegment, 0),
+	}
+
+	for _, seg := range boundaries {
+		if seg.IsVertical {
+			col := seg.Segment.Start.Col
+			index.VerticalByCol[col] = append(index.VerticalByCol[col], seg)
+			index.AllVerticalSegments = append(index.AllVerticalSegments, seg)
+		} else {
+			row := seg.Segment.Start.Row
+			index.HorizontalByRow[row] = append(index.HorizontalByRow[row], seg)
+		}
+	}
+
+	return index
+}
+
 func main() {
 	path := filepath.Join("inputs/day09.txt")
 
@@ -171,6 +203,9 @@ func main() {
 
 	// boundaries are the line segments that make up the outline of the red and green tiles
 	boundaries := buildBoundary(tiles)
+
+	// Build spatial index for faster boundary checks
+	spatialIndex := buildSpatialIndex(boundaries)
 
 	var largestArea float64
 	var largestAreaInsideBoundaries float64
@@ -229,7 +264,7 @@ func main() {
 				case <-ctx.Done():
 					return
 				default:
-					if isValidRectangle(rect, boundaries, redTileMap) {
+					if isValidRectangle(rect, spatialIndex, redTileMap) {
 						resultChan <- rect.Area
 						// Found valid rectangle, signal all workers to stop
 						fmt.Println("Found valid rectangle, signaling all workers to stop")
