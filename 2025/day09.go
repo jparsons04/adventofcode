@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -28,25 +29,27 @@ type RectCandidate struct {
 	Area    float64
 }
 
-func isOnBoundary(point TileCoord, redTiles []TileCoord, boundaries []LineSegment) bool {
-	if slices.Contains(redTiles, point) {
+type BoundarySegment struct {
+	Segment                        LineSegment
+	MinRow, MaxRow, MinCol, MaxCol float64
+	IsVertical                     bool
+}
+
+func isOnBoundary(
+	point TileCoord,
+	boundaries []BoundarySegment,
+	redTileMap map[TileCoord]bool) bool {
+	if _, ok := redTileMap[point]; ok {
 		return true
 	}
 
 	for _, boundary := range boundaries {
-		minRow := math.Min(boundary.Start.Row, boundary.End.Row)
-		minCol := math.Min(boundary.Start.Col, boundary.End.Col)
-		maxRow := math.Max(boundary.Start.Row, boundary.End.Row)
-		maxCol := math.Max(boundary.Start.Col, boundary.End.Col)
-
-		if boundary.Start.Col == boundary.End.Col {
-			// Vertical boundary
-			if boundary.Start.Col == point.Col && minRow <= point.Row && point.Row <= maxRow {
+		if boundary.IsVertical {
+			if boundary.Segment.Start.Col == point.Col && boundary.MinRow <= point.Row && point.Row <= boundary.MaxRow {
 				return true
 			}
 		} else {
-			// Horizontal boundary
-			if boundary.Start.Row == point.Row && minCol <= point.Col && point.Col <= maxCol {
+			if boundary.Segment.Start.Row == point.Row && boundary.MinCol <= point.Col && point.Col <= boundary.MaxCol {
 				return true
 			}
 		}
@@ -55,15 +58,13 @@ func isOnBoundary(point TileCoord, redTiles []TileCoord, boundaries []LineSegmen
 	return false
 }
 
-func isInside(point TileCoord, boundaries []LineSegment) bool {
+func isInside(point TileCoord, boundaries []BoundarySegment) bool {
 	intersections := 0
 	for _, segment := range boundaries {
 		// Vertical line segments only
-		if segment.Start.Col == segment.End.Col {
-			segCol := segment.Start.Col
-			minRow := math.Min(segment.Start.Row, segment.End.Row)
-			maxRow := math.Max(segment.Start.Row, segment.End.Row)
-			if segCol > point.Col && minRow <= point.Row && point.Row < maxRow {
+		if segment.IsVertical {
+			segCol := segment.Segment.Start.Col
+			if segCol > point.Col && segment.MinRow <= point.Row && point.Row < segment.MaxRow {
 				intersections++
 			}
 		}
@@ -72,11 +73,14 @@ func isInside(point TileCoord, boundaries []LineSegment) bool {
 	return intersections%2 == 1
 }
 
-func isValidRectangle(rect RectCandidate, tiles []TileCoord, boundaries []LineSegment) bool {
+func isValidRectangle(
+	rect RectCandidate,
+	boundaries []BoundarySegment,
+	redTileMap map[TileCoord]bool) bool {
 	perimeter := generatePerimeter([]TileCoord{rect.Corner1, rect.Corner2})
 
 	for _, point := range perimeter {
-		if !isOnBoundary(point, tiles, boundaries) {
+		if !isOnBoundary(point, boundaries, redTileMap) {
 			if !isInside(point, boundaries) {
 				return false
 			}
@@ -122,11 +126,18 @@ func generatePerimeter(corners []TileCoord) []TileCoord {
 	return perimeter
 }
 
-func buildBoundary(tiles []TileCoord) []LineSegment {
-	segments := make([]LineSegment, len(tiles))
+func buildBoundary(tiles []TileCoord) []BoundarySegment {
+	segments := make([]BoundarySegment, len(tiles))
 	for i := range tiles {
 		nextIdx := (i + 1) % len(tiles)
-		segments[i] = LineSegment{Start: tiles[i], End: tiles[nextIdx]}
+		segments[i] = BoundarySegment{
+			Segment:    LineSegment{Start: tiles[i], End: tiles[nextIdx]},
+			MinRow:     math.Min(tiles[i].Row, tiles[nextIdx].Row),
+			MaxRow:     math.Max(tiles[i].Row, tiles[nextIdx].Row),
+			MinCol:     math.Min(tiles[i].Col, tiles[nextIdx].Col),
+			MaxCol:     math.Max(tiles[i].Col, tiles[nextIdx].Col),
+			IsVertical: tiles[i].Col == tiles[nextIdx].Col,
+		}
 	}
 	return segments
 }
@@ -158,6 +169,7 @@ func main() {
 		tiles = append(tiles, TileCoord{Col: posFloat[0], Row: posFloat[1]})
 	}
 
+	// boundaries are the line segments that make up the outline of the red and green tiles
 	boundaries := buildBoundary(tiles)
 
 	var largestArea float64
@@ -165,6 +177,7 @@ func main() {
 
 	rectCandidates := make([]RectCandidate, 0)
 
+	// Iterate over pairs of tiles to evaluate all possible rectangle candidates
 	for _, tile1 := range tiles {
 		for _, tile2 := range tiles {
 			if tile1 != tile2 {
@@ -175,12 +188,15 @@ func main() {
 					largestArea = area
 				}
 
+				// For Part 2
 				rectCandidates = append(rectCandidates, RectCandidate{Corner1: tile1, Corner2: tile2, Area: area})
 			}
 		}
 	}
 
 	// Sort rectangle candidates by Area descending
+	// The first worker to find a valid rectangle will signal all workers to stop
+	// because that will be the largest valid rectangle found
 	slices.SortFunc(rectCandidates, func(a, b RectCandidate) int {
 		if b.Area > a.Area {
 			return 1
@@ -190,21 +206,18 @@ func main() {
 		return 0
 	})
 
-	// Filter out the smallest 25% of all rectangle candidates
-	maxAreaThreshold := largestArea * 0.25
-	filteredCandidates := make([]RectCandidate, 0)
-	for _, candidate := range rectCandidates {
-		if candidate.Area >= maxAreaThreshold {
-			filteredCandidates = append(filteredCandidates, candidate)
-		}
-	}
-
-	fmt.Printf("Total candidates: %d, Filtered to: %d (threshold: %.0f)\n", len(rectCandidates), len(filteredCandidates), maxAreaThreshold)
-
 	numWorkers := 12
 	candidateChan := make(chan RectCandidate, numWorkers)
 	resultChan := make(chan float64, numWorkers)
 	var wg sync.WaitGroup
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	redTileMap := make(map[TileCoord]bool)
+	for _, tile := range tiles {
+		redTileMap[tile] = true
+	}
 
 	// Start workers
 	for i := 0; i < numWorkers; i++ {
@@ -212,21 +225,35 @@ func main() {
 		go func() {
 			defer wg.Done()
 			for rect := range candidateChan {
-				if isValidRectangle(rect, tiles, boundaries) {
-					resultChan <- rect.Area
-					// Found valid rectangle, return from worker
+				select {
+				case <-ctx.Done():
 					return
+				default:
+					if isValidRectangle(rect, boundaries, redTileMap) {
+						resultChan <- rect.Area
+						// Found valid rectangle, signal all workers to stop
+						fmt.Println("Found valid rectangle, signaling all workers to stop")
+						cancel()
+						return
+					}
 				}
 			}
 		}()
 	}
 
+	fmt.Printf("Total rectangle candidates: %d\n", len(rectCandidates))
+
 	// Send candidates to workers
 	go func() {
-		for i, candidate := range filteredCandidates {
-			candidateChan <- candidate
-			if i%1000 == 0 {
-				fmt.Printf("Queued %d candidates...\n", i)
+		for i, candidate := range rectCandidates {
+			select {
+			case <-ctx.Done():
+				close(candidateChan)
+				return
+			case candidateChan <- candidate:
+				if i%1000 == 0 {
+					fmt.Printf("Queued %d candidates...\n", i)
+				}
 			}
 		}
 		close(candidateChan)
