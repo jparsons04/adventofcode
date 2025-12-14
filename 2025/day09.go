@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,11 +37,12 @@ type BoundarySegment struct {
 }
 
 type SpatialIndex struct {
-	VerticalByCol     map[float64][]BoundarySegment // Vertical segments indexed by column
-	HorizontalByRow   map[float64][]BoundarySegment // Horizontal segments indexed by row
+	VerticalByCol       map[float64][]BoundarySegment // Vertical segments indexed by column
+	HorizontalByRow     map[float64][]BoundarySegment // Horizontal segments indexed by row
 	AllVerticalSegments []BoundarySegment             // Pre-filtered list of all vertical segments for ray casting
 }
 
+// isOnBoundary checks if a red tile is on the boundary of the loop
 func isOnBoundary(
 	point TileCoord,
 	spatialIndex SpatialIndex,
@@ -70,6 +72,8 @@ func isOnBoundary(
 	return false
 }
 
+// isInside checks if a red tile is inside the loop by ray casting
+// from the point to the right and counting the number of intersections
 func isInside(point TileCoord, spatialIndex SpatialIndex) bool {
 	intersections := 0
 
@@ -84,6 +88,7 @@ func isInside(point TileCoord, spatialIndex SpatialIndex) bool {
 	return intersections%2 == 1
 }
 
+// isValidRectangle checks if a rectangle candidate is completely contained within the loop
 func isValidRectangle(
 	rect RectCandidate,
 	spatialIndex SpatialIndex,
@@ -105,6 +110,7 @@ func getArea(tile1, tile2 TileCoord) float64 {
 	return (math.Abs(tile2.Col-tile1.Col) + 1) * (math.Abs(tile2.Row-tile1.Row) + 1)
 }
 
+// generatePerimeter generates the tile coordinates that make up the perimeter of a rectangle
 func generatePerimeter(corners []TileCoord) []TileCoord {
 	perimeter := make([]TileCoord, 0)
 
@@ -137,6 +143,7 @@ func generatePerimeter(corners []TileCoord) []TileCoord {
 	return perimeter
 }
 
+// buildBoundary builds the boundary line segments that make up the outline of the red and green tiles
 func buildBoundary(tiles []TileCoord) []BoundarySegment {
 	segments := make([]BoundarySegment, len(tiles))
 	for i := range tiles {
@@ -153,10 +160,12 @@ func buildBoundary(tiles []TileCoord) []BoundarySegment {
 	return segments
 }
 
+// buildSpatialIndex builds a spatial index for the loop's boundaries
+// for faster boundary checks
 func buildSpatialIndex(boundaries []BoundarySegment) SpatialIndex {
 	index := SpatialIndex{
-		VerticalByCol:     make(map[float64][]BoundarySegment),
-		HorizontalByRow:   make(map[float64][]BoundarySegment),
+		VerticalByCol:       make(map[float64][]BoundarySegment),
+		HorizontalByRow:     make(map[float64][]BoundarySegment),
 		AllVerticalSegments: make([]BoundarySegment, 0),
 	}
 
@@ -190,12 +199,11 @@ func main() {
 
 	for sc.Scan() {
 		tile := strings.Split(sc.Text(), ",")
-		pos := make([]int, len(tile))
 		posFloat := make([]float64, len(tile))
 
 		for i, v := range tile {
-			pos[i], _ = strconv.Atoi(v)
-			posFloat[i] = float64(pos[i])
+			val, _ := strconv.Atoi(v)
+			posFloat[i] = float64(val)
 		}
 
 		tiles = append(tiles, TileCoord{Col: posFloat[0], Row: posFloat[1]})
@@ -213,16 +221,41 @@ func main() {
 	rectCandidates := make([]RectCandidate, 0)
 
 	// Iterate over pairs of tiles to evaluate all possible rectangle candidates
-	for _, tile1 := range tiles {
-		for _, tile2 := range tiles {
-			if tile1 != tile2 {
-				area := getArea(tile1, tile2)
+	for i, tile1 := range tiles {
+		for j, tile2 := range tiles {
+			if i <= j {
+				continue
+			}
 
-				// For Part 1
-				if area > largestArea {
-					largestArea = area
+			area := getArea(tile1, tile2)
+
+			// For Part 1
+			if area > largestArea {
+				largestArea = area
+			}
+
+			// Check if any other red tile is strictly inside this rectangle
+			hasInteriorRedTile := false
+			minCol := math.Min(tile1.Col, tile2.Col)
+			maxCol := math.Max(tile1.Col, tile2.Col)
+			minRow := math.Min(tile1.Row, tile2.Row)
+			maxRow := math.Max(tile1.Row, tile2.Row)
+
+			for k, tile3 := range tiles {
+				if k == i || k == j {
+					// Skip the corners
+					continue
 				}
 
+				// Check if tile3 is strictly inside the rectangle
+				if minCol < tile3.Col && tile3.Col < maxCol && minRow < tile3.Row && tile3.Row < maxRow {
+					hasInteriorRedTile = true
+					// One interior red tile is enough to make the rectangle invalid
+					break
+				}
+			}
+
+			if !hasInteriorRedTile {
 				// For Part 2
 				rectCandidates = append(rectCandidates, RectCandidate{Corner1: tile1, Corner2: tile2, Area: area})
 			}
@@ -241,7 +274,7 @@ func main() {
 		return 0
 	})
 
-	numWorkers := 12
+	numWorkers := runtime.NumCPU()
 	candidateChan := make(chan RectCandidate, numWorkers)
 	resultChan := make(chan float64, numWorkers)
 	var wg sync.WaitGroup
@@ -255,7 +288,7 @@ func main() {
 	}
 
 	// Start workers
-	for i := 0; i < numWorkers; i++ {
+	for range numWorkers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -267,7 +300,6 @@ func main() {
 					if isValidRectangle(rect, spatialIndex, redTileMap) {
 						resultChan <- rect.Area
 						// Found valid rectangle, signal all workers to stop
-						fmt.Println("Found valid rectangle, signaling all workers to stop")
 						cancel()
 						return
 					}
@@ -276,19 +308,15 @@ func main() {
 		}()
 	}
 
-	fmt.Printf("Total rectangle candidates: %d\n", len(rectCandidates))
-
 	// Send candidates to workers
 	go func() {
-		for i, candidate := range rectCandidates {
+		for _, candidate := range rectCandidates {
 			select {
 			case <-ctx.Done():
 				close(candidateChan)
 				return
-			case candidateChan <- candidate:
-				if i%1000 == 0 {
-					fmt.Printf("Queued %d candidates...\n", i)
-				}
+			default:
+				candidateChan <- candidate
 			}
 		}
 		close(candidateChan)
@@ -308,5 +336,5 @@ func main() {
 	}
 
 	fmt.Printf("Part one, largest area of any rectange: %.0f\n", largestArea)
-	fmt.Printf("Part two, largest area of any rectange inside boundaries: %.0f\n", largestAreaInsideBoundaries)
+	fmt.Printf("Part two, largest area of any rectangle inside boundaries: %.0f\n", largestAreaInsideBoundaries)
 }
