@@ -205,15 +205,16 @@ func forwardElimination(matrix AugmentedMatrix) []int {
 	return pivotColumns
 }
 
-// eliminateAbove eliminates the entries above the pivot in the given column
-// by subtracting a multiple of the pivot row from the target row
-// to make the entry above the pivot zero
+// eliminateAbove eliminates the entries above the pivot in the given column by
+// subtracting a multiple of the pivot row from the target row to make the
+// entry above the pivot zero
 func eliminateAbove(matrix AugmentedMatrix, pivotRow, targetRow, col int) {
 	eliminateBelow(matrix, pivotRow, targetRow, col)
 }
 
-// backSubstitution performs back substitution on the augmented matrix to solve
-// for the free variables by eliminating the entries above the pivots in each column
+// backSubstitution solves for the free variables of the augmented matrix by
+// eliminating the entries above the pivots in each column. The resulting
+// matrix after this step will be in Reduced Row Echelon Form (RREF).
 func backSubstitution(matrix AugmentedMatrix, pivotColumns []int) {
 	// Process pivot columns from right to left
 	for i := len(pivotColumns) - 1; i >= 0; i-- {
@@ -572,11 +573,12 @@ LightLoop:
 	return partOneTotalButtonPresses
 }
 
-// solvePartTwo solves Part Two using Gaussian elimination to express the system
-// as a linear combination of free variables, then enumerates possible values to
-// find the minimum number of button presses. Phase 1 simplifcation of Gaussian
-// elimination is skipped because greedy local optimization can produce globally
-// suboptimal solutions.
+// solvePartTwo solves Part Two using Gaussian elimination to express the
+// system as a linear combination of free variables, then enumerates possible
+// values to find the minimum number of button presses. Note that this solution
+// does not simplify the matrix by finding forced variables before Gaussian
+// elimination.  When a forced variable affects multiple columns, solving it
+// greedily can produce globally suboptimal solutions.
 func solvePartTwo(machine Machine) int {
 	coefficientMatrix := buildCoefficientMatrix(machine.Buttons, machine.DesiredJoltageState)
 	augmentedMatrix := buildAugmentedMatrix(coefficientMatrix, machine.DesiredJoltageState, machine.Buttons)
