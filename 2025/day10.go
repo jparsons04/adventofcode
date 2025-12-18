@@ -573,12 +573,16 @@ LightLoop:
 	return partOneTotalButtonPresses
 }
 
-// solvePartTwo solves Part Two using Gaussian elimination to express the
-// system as a linear combination of free variables, then enumerates possible
-// values to find the minimum number of button presses. Note that this solution
-// does not simplify the matrix by finding forced variables before Gaussian
-// elimination.  When a forced variable affects multiple columns, solving it
-// greedily can produce globally suboptimal solutions.
+// solvePartTwo solves Part Two by using Gaussian elimination to express the
+// system as a linear combination of free variables. It then enumerates a
+// constrained set of possible values to find the minimum number of button
+// presses to satisfy the equations.
+//
+// Note that this solution does not reduce the matrix by finding forced
+// variables before Gaussian elimination. If exactly one button affects a
+// counter, reduction would assume the button's press count is determined
+// before elimination. But if that button affects other counters, then that
+// premature local optimization can produce globally suboptimal outcomes.
 func solvePartTwo(machine Machine) int {
 	coefficientMatrix := buildCoefficientMatrix(machine.Buttons, machine.DesiredJoltageState)
 	augmentedMatrix := buildAugmentedMatrix(coefficientMatrix, machine.DesiredJoltageState, machine.Buttons)
