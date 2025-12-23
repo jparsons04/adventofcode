@@ -5,70 +5,33 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"sync"
 )
 
 type Graph struct {
 	Devices map[string][]string
-	Mutex   sync.Mutex
-	Count   int
 }
 
-func (g *Graph) Increment() {
-	g.Mutex.Lock()
-	defer g.Mutex.Unlock()
-	g.Count++
-}
-
-func (g *Graph) bfs(src, dst string, path []string) {
-	var q []string
-	q = append(q, src)
-
-	for {
-		path = append(path, q[0])
-		q = q[1:]
-
-		current := path[len(path)-1]
-
-		if current == dst {
-			g.Increment()
-		}
-
-		for _, neighbor := range g.Devices[current] {
-			var newPath []string
-			copy(newPath, path)
-			newPath = append(newPath, neighbor)
-			for _, p := range newPath {
-				q = append(q, p)
-			}
-		}
-
-		if len(path) == 0 {
-			break
-		}
-	}
-}
-
-func (g *Graph) dfs(src, dst string, path []string, partTwo bool) {
-	path = append(path, src)
-
-	if src == dst {
-		if partTwo {
-			if slices.Contains(path, "dac") && slices.Contains(path, "fft") {
-				g.Increment()
-			}
-		} else {
-			g.Increment()
-		}
-	} else {
-		for _, neighbor := range g.Devices[src] {
-			g.dfs(neighbor, dst, path, partTwo)
-		}
+func countPaths(node, dst string, graph map[string][]string, memo map[string]map[string]int) int {
+	if node == dst {
+		return 1
 	}
 
-	path = path[1:]
+	if _, ok := memo[node]; !ok {
+		memo[node] = make(map[string]int)
+	}
+
+	if count, exists := memo[node][dst]; exists {
+		return count
+	}
+
+	total := 0
+	for _, neighbor := range graph[node] {
+		total += countPaths(neighbor, dst, graph, memo)
+	}
+
+	memo[node][dst] = total
+	return total
 }
 
 func main() {
@@ -92,36 +55,26 @@ func main() {
 		graph.Devices[deviceName] = deviceOutputs
 	}
 
-	sinks := make([]string, 0)
+	// Memoization map to store the number of paths between two nodes
+	pathCount := make(map[string]map[string]int)
 
-	for name, outputs := range graph.Devices {
-		if slices.Contains(outputs, "out") {
-			sinks = append(sinks, name)
-		}
-	}
+	// Part one
+	pathCount["you"]["out"] = countPaths("you", "out", graph.Devices, pathCount)
 
-	var path []string
+	// Part two
+	// svr -> dac -> fft -> out
+	pathCount["svr"]["dac"] = countPaths("svr", "dac", graph.Devices, pathCount)
+	pathCount["dac"]["fft"] = countPaths("dac", "fft", graph.Devices, pathCount)
+	pathCount["fft"]["out"] = countPaths("fft", "out", graph.Devices, pathCount)
 
-	for _, sink := range sinks {
-		graph.dfs("you", sink, path, false)
-	}
+	// svr -> fft -> dac -> out
+	pathCount["svr"]["fft"] = countPaths("svr", "fft", graph.Devices, pathCount)
+	pathCount["fft"]["dac"] = countPaths("fft", "dac", graph.Devices, pathCount)
+	pathCount["dac"]["out"] = countPaths("dac", "out", graph.Devices, pathCount)
 
-	fmt.Printf("Part one, number of paths leading you to out: %d\n", graph.Count)
+	partTwoCount := (pathCount["svr"]["dac"] * pathCount["dac"]["fft"] * pathCount["fft"]["out"]) +
+		(pathCount["svr"]["fft"] * pathCount["fft"]["dac"] * pathCount["dac"]["out"])
 
-	graph.Count = 0
-	path = []string{}
-
-	var wg sync.WaitGroup
-
-	for _, sink := range sinks {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			graph.dfs("svr", sink, path, true)
-		}()
-	}
-
-	wg.Wait()
-
-	fmt.Printf("Part two, number of paths from svr to out through both dac and fft: %d\n", graph.Count)
+	fmt.Printf("Part one, number of paths leading you to out: %d\n", pathCount["you"]["out"])
+	fmt.Printf("Part two, number of paths from svr to out through both dac and fft: %d\n", partTwoCount)
 }
