@@ -31,11 +31,6 @@ type Present struct {
 	Points []Point
 }
 
-type Choice struct {
-	Pos                  []int
-	PresentInstanceIndex int
-}
-
 func Rotate(p Present) Present {
 	newPoints := make([]Point, len(p.Points))
 	for i, pt := range p.Points {
@@ -161,45 +156,6 @@ func FindPresents(presentCounts map[int]int) []Present {
 	return presents
 }
 
-// GenChoices creates a list of choices to be used for the incidence matrix
-// Choices are the possible placements of presents in the region
-func GenChoices(width, length int, region Region) []Choice {
-	choices := make([]Choice, 0)
-	presents := FindPresents(region.PresentCount)
-
-	// Cache orientations per present type to avoid redundant computation
-	orientationCache := make(map[int][]Present)
-	for presentIdx := range presents {
-		presentType := presents[presentIdx].Index
-		if _, exists := orientationCache[presentType]; !exists {
-			orientationCache[presentType] = GenOrientations(presents[presentIdx])
-		}
-	}
-
-	for rowIdx := range width {
-		for colIdx := range length {
-			for presentInstanceIdx := range presents {
-				orientations := orientationCache[presents[presentInstanceIdx].Index]
-				for orientationIdx := range orientations {
-					if isValidPlacement(rowIdx, colIdx, width, length, orientations[orientationIdx]) {
-						pos := make([]int, len(orientations[orientationIdx].Points))
-						for pointIdx := range orientations[orientationIdx].Points {
-							pos[pointIdx] = (orientations[orientationIdx].Points[pointIdx].Y+colIdx)*width + (orientations[orientationIdx].Points[pointIdx].X + rowIdx)
-						}
-
-						choices = append(choices, Choice{
-							Pos:                  pos,
-							PresentInstanceIndex: presentInstanceIdx,
-						})
-					}
-				}
-			}
-		}
-	}
-
-	return choices
-}
-
 // ===============================
 // Incidence matrix implementation
 // Note that this matrix is used in Algorithm X to solve a slight variation of the exact cover problem
@@ -207,29 +163,10 @@ func GenChoices(width, length int, region Region) []Choice {
 // Columns for present instances must be covered exactly once
 // Columns for grid positions can be covered at most once
 
-// GenMatrix builds the incidence matrix for a given region
-// The matrix is a boolean matrix where each row represents a choice and each column represents a present instance or a grid position
-func GenMatrix(width, length int, region Region) [][]bool {
-	choices := GenChoices(width, length, region)
-	matrix := make([][]bool, len(choices))
-
-	var presentCount int
-	for _, count := range region.PresentCount {
-		presentCount += count
-	}
-
-	for rowIdx := range matrix {
-		matrix[rowIdx] = make([]bool, presentCount+width*length)
-	}
-
-	for choiceIdx := range choices {
-		matrix[choiceIdx][choices[choiceIdx].PresentInstanceIndex] = true
-		for posIdx := range choices[choiceIdx].Pos {
-			matrix[choiceIdx][presentCount+choices[choiceIdx].Pos[posIdx]] = true
-		}
-	}
-
-	return matrix
+// SparseRow represents a row in the incidence matrix, but instead of storing a
+// boolean for each column, we store the index of the column that is true.
+type SparseRow struct {
+	TrueColumns []int
 }
 
 // ============================
@@ -301,10 +238,11 @@ func Uncover(h *Header) {
 	h.L.R = h
 }
 
-// BuildDLX builds the dancing links matrix for a given region
-func BuildDLX(matrix [][]bool, presentLen int) *Header {
-	numColumns := len(matrix[0])
-
+// BuildDLXSparse builds the dancing links matrix for a given list of sparse rows
+// which are built in BuildDLXStreamed.
+// The primary columns are the present instances, and the secondary columns are the
+// grid positions that will be occupied.
+func BuildDLXSparse(sparseRows []SparseRow, numPrimaryColumns, numColumns int) *Header {
 	root := &Header{N: -1}
 	root.L = root
 	root.R = root
@@ -327,50 +265,89 @@ func BuildDLX(matrix [][]bool, presentLen int) *Header {
 		root.L = header
 		headers[i] = header
 		prev = header
-		if i < presentLen {
+		if i < numPrimaryColumns {
 			header.IsPrimary = true
 		}
 	}
 
-	for _, row := range matrix {
-		var first, last *Node
+	for _, row := range sparseRows {
+		var rowStart *Node
 
-		for colIdx, val := range row {
-			if val {
-				header := headers[colIdx]
-				node := &Node{C: header}
+		for _, colIdx := range row.TrueColumns {
+			node := &Node{C: headers[colIdx]}
 
-				node.D = &header.Node
-				node.U = header.Node.U
-				header.Node.U.D = node
-				header.Node.U = node
-				header.S++
+			node.U = headers[colIdx].U
+			node.D = &headers[colIdx].Node
+			node.U.D = node
+			node.D.U = node
+			headers[colIdx].S++
 
-				if first == nil {
-					first = node
-					last = node
-					node.L = node
-					node.R = node
-				} else {
-					node.L = last
-					node.R = first
-					last.R = node
-					first.L = node
-					last = node
+			if rowStart == nil {
+				rowStart = node
+				node.L = node
+				node.R = node
+			} else {
+				node.L = rowStart.L
+				node.R = rowStart
+				node.L.R = node
+				node.R.L = node
+			}
+		}
+	}
+
+	return root
+}
+
+var globalOrientationCache map[int][]Present
+
+func InitializeOrientationCache() {
+	globalOrientationCache = make(map[int][]Present)
+	for _, present := range allPresentTypes {
+		globalOrientationCache[present.Index] = GenOrientations(present)
+	}
+}
+
+// BuildDLXStreamed builds the dancing links matrix for a given region For each
+// valid placement of a present, a sparse row is added to the matrix. The
+// primary column is the present instance, and the secondary columns are the
+// grid positions that will be occupied.
+func BuildDLXStreamed(region Region) *Header {
+	width := region.Width
+	length := region.Length
+
+	sparseRows := make([]SparseRow, 0)
+	presents := FindPresents(region.PresentCount)
+
+	for rowIdx := range width {
+		for colIdx := range length {
+			for presentInstanceIdx := range presents {
+				orientations := globalOrientationCache[presents[presentInstanceIdx].Index]
+				for _, orientation := range orientations {
+					if isValidPlacement(rowIdx, colIdx, width, length, orientation) {
+						trueColumns := make([]int, 0, len(orientation.Points)+1)
+						trueColumns = append(trueColumns, presentInstanceIdx)
+
+						for pointIdx := range orientation.Points {
+							gridPos := (orientation.Points[pointIdx].Y+colIdx)*width +
+								(orientation.Points[pointIdx].X + rowIdx)
+
+							trueColumns = append(trueColumns, len(presents)+gridPos)
+						}
+
+						sparseRow := SparseRow{
+							TrueColumns: trueColumns,
+						}
+
+						sparseRows = append(sparseRows, sparseRow)
+					}
 				}
 			}
 		}
 	}
 
-	// Check for unsolvable constraints: any primary column with 0 choices
-	for rootHeader := root.R; rootHeader != root; rootHeader = rootHeader.R {
-		// If a required present has no valid placements, the region is unsolvable
-		if rootHeader.IsPrimary && rootHeader.S == 0 {
-			return nil
-		}
-	}
-
-	return root
+	presentCount := len(presents)
+	numColumns := presentCount + (width * length)
+	return BuildDLXSparse(sparseRows, presentCount, numColumns)
 }
 
 // SearchState represents the state of the DLX search at a particular point
@@ -392,6 +369,7 @@ func SolveDLXIterative(h *Header) [][]*Node {
 			break
 		}
 	}
+
 	if allPrimaryColsCovered {
 		return [][]*Node{{}}
 	}
@@ -449,6 +427,7 @@ func SolveDLXIterative(h *Header) [][]*Node {
 			for i := len(newCoveredColumns) - 1; i >= 0; i-- {
 				Uncover(newCoveredColumns[i])
 			}
+
 			return [][]*Node{newSolution}
 		}
 
@@ -582,7 +561,10 @@ func main() {
 
 	regions := parseInput(sc)
 
-	numWorkers := 2
+	// Initialize the present orientation cache before processing the regions
+	InitializeOrientationCache()
+
+	numWorkers := 4
 
 	type result struct {
 		regionNum   int
@@ -606,12 +588,10 @@ func main() {
 
 				// Quick feasibility check: total polyomino cells must fit in region
 				totalPolyominoCells := 0
-				presentInstanceCount := 0
 				for presentIdx, count := range region.PresentCount {
 					if count > 0 && presentIdx < len(allPresentTypes) {
 						cellsPerPresent := len(allPresentTypes[presentIdx].Points)
 						totalPolyominoCells += count * cellsPerPresent
-						presentInstanceCount += count
 					}
 				}
 
@@ -622,8 +602,7 @@ func main() {
 					continue
 				}
 
-				matrix := GenMatrix(width, length, region)
-				root := BuildDLX(matrix, presentInstanceCount)
+				root := BuildDLXStreamed(region)
 
 				if root == nil {
 					resultsChan <- result{i + 1, false, "Unsolvable (no valid placements)"}
