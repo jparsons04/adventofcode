@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -522,7 +521,7 @@ func main() {
 
 	regions := parseInput(sc)
 
-	numWorkers := runtime.NumCPU()
+	numWorkers := 6
 
 	type result struct {
 		regionNum   int
