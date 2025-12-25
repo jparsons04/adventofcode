@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -374,9 +373,17 @@ func BuildDLX(matrix [][]bool, presentLen int) *Header {
 	return root
 }
 
-// SolveDLXRecursive solves the dancing links matrix using Algorithm X
-// It recursively covers and uncovers columns to find a solution
-func SolveDLXRecursive(h *Header, k int, solution []*Node) [][]*Node {
+// SearchState represents the state of the DLX search at a particular point
+type SearchState struct {
+	column         *Header
+	currentRow     *Node
+	solution       []*Node
+	coveredColumns []*Header
+}
+
+// SolveDLXIterative solves the dancing links matrix using Algorithm X iteratively
+// This tries to reduce memory usage by using a stack to store the state of the search
+func SolveDLXIterative(h *Header) [][]*Node {
 	// Base case: if all primary columns are covered, a solution has been found
 	allPrimaryColsCovered := true
 	for r := h.R; r != h; r = r.R {
@@ -385,58 +392,100 @@ func SolveDLXRecursive(h *Header, k int, solution []*Node) [][]*Node {
 			break
 		}
 	}
-
 	if allPrimaryColsCovered {
-		solCopy := make([]*Node, len(solution))
-		copy(solCopy, solution)
-		return [][]*Node{solCopy}
+		return [][]*Node{{}}
 	}
 
-	c := ChooseColumn(h)
-	Cover(c)
+	// Initialize with first column choice
+	initialColumn := ChooseColumn(h)
+	if initialColumn == nil {
+		return nil
+	}
 
-	for row := c.D; row != &c.Node; row = row.D {
-		solution = append(solution, row)
+	Cover(initialColumn)
+	stack := []SearchState{{
+		column:         initialColumn,
+		currentRow:     initialColumn.D,
+		solution:       []*Node{},
+		coveredColumns: []*Header{initialColumn},
+	}}
 
-		for col := row.R; col != row; col = col.R {
+	for len(stack) > 0 {
+		state := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		// Check if we've exhausted all rows in this column
+		if state.currentRow == &state.column.Node {
+			// Backtrack: uncover column and continue
+			Uncover(state.column)
+			continue
+		}
+
+		// Try this row: add to solution and cover affected columns
+		newSolution := make([]*Node, len(state.solution)+1)
+		copy(newSolution, state.solution)
+		newSolution[len(state.solution)] = state.currentRow
+
+		newCoveredColumns := make([]*Header, len(state.coveredColumns))
+		copy(newCoveredColumns, state.coveredColumns)
+
+		// Cover all columns in this row
+		for col := state.currentRow.R; col != state.currentRow; col = col.R {
 			Cover(col.C)
+			newCoveredColumns = append(newCoveredColumns, col.C)
 		}
 
-		res := SolveDLXRecursive(h, k+1, solution)
-		if len(res) > 0 {
-			Uncover(c)
-			return res
+		// Check if solution is complete
+		allPrimaryColsCovered := true
+		for r := h.R; r != h; r = r.R {
+			if r.IsPrimary {
+				allPrimaryColsCovered = false
+				break
+			}
 		}
 
-		solution = solution[:len(solution)-1]
+		if allPrimaryColsCovered {
+			// Found a solution, so clean up the covered columns and return the solution
+			for i := len(newCoveredColumns) - 1; i >= 0; i-- {
+				Uncover(newCoveredColumns[i])
+			}
+			return [][]*Node{newSolution}
+		}
 
-		for col := row.L; col != row; col = col.L {
-			Uncover(col.C)
+		// Push backtrack state for this row
+		stack = append(stack, SearchState{
+			column:         state.column,
+			currentRow:     state.currentRow.D, // Next row to try
+			solution:       state.solution,
+			coveredColumns: state.coveredColumns,
+		})
+
+		// Choose next column and push its state
+		nextColumn := ChooseColumn(h)
+		if nextColumn != nil {
+			Cover(nextColumn)
+			newCoveredColumns = append(newCoveredColumns, nextColumn)
+			stack = append(stack, SearchState{
+				column:         nextColumn,
+				currentRow:     nextColumn.D,
+				solution:       newSolution,
+				coveredColumns: newCoveredColumns,
+			})
+		} else {
+			// No column to choose, need to backtrack
+			// Uncover columns we just covered
+			for i := len(newCoveredColumns) - 1; i >= len(state.coveredColumns); i-- {
+				Uncover(newCoveredColumns[i])
+			}
 		}
 	}
 
-	Uncover(c)
 	return nil
 }
 
 // SolveDLX solves the dancing links matrix using Algorithm X
-func SolveDLX(h *Header) ([][]*Node, bool) {
-	resultChan := make(chan [][]*Node, 1)
-
-	go func() {
-		result := SolveDLXRecursive(h, 0, nil)
-		resultChan <- result
-	}()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	select {
-	case result := <-resultChan:
-		return result, true
-	case <-ctx.Done():
-		return nil, false
-	}
+func SolveDLX(h *Header) [][]*Node {
+	return SolveDLXIterative(h)
 }
 
 // ==========================
@@ -581,11 +630,9 @@ func main() {
 					continue
 				}
 
-				solutions, completed := SolveDLX(root)
+				solutions := SolveDLX(root)
 
-				if !completed {
-					resultsChan <- result{i + 1, false, "Context cancelled"}
-				} else if len(solutions) > 0 {
+				if len(solutions) > 0 {
 					resultsChan <- result{i + 1, true, "Solution found"}
 				} else {
 					resultsChan <- result{i + 1, false, "No solution"}
