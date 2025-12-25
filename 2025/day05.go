@@ -38,8 +38,14 @@ func main() {
 
 		currentRange := strings.Split(line, "-")
 
-		rangeStart, _ := strconv.Atoi(currentRange[0])
-		rangeEnd, _ := strconv.Atoi(currentRange[1])
+		rangeStart, err := strconv.Atoi(currentRange[0])
+		if err != nil {
+			panic(err)
+		}
+		rangeEnd, err := strconv.Atoi(currentRange[1])
+		if err != nil {
+			panic(err)
+		}
 
 		freshRanges = append(freshRanges, freshRange{
 			rangeStart: rangeStart,
@@ -51,7 +57,10 @@ func main() {
 
 	// Then evaluate ingredient IDs against all of the ranges
 	for sc.Scan() {
-		ingredientID, _ := strconv.Atoi(sc.Text())
+		ingredientID, err := strconv.Atoi(sc.Text())
+		if err != nil {
+			panic(err)
+		}
 
 		for _, freshRange := range freshRanges {
 			if ingredientID >= freshRange.rangeStart && ingredientID <= freshRange.rangeEnd {

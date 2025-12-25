@@ -10,11 +10,6 @@ import (
 	"strings"
 )
 
-type freshRange struct {
-	rangeStart int
-	rangeEnd   int
-}
-
 func transposeRuneOperands(matrix [][]rune) [][]rune {
 	rows := len(matrix)
 	cols := len(matrix[0])
@@ -64,13 +59,17 @@ func main() {
 		intLineOperands := []int{}
 
 		for _, operand := range lineFields {
-			intOperand, _ := strconv.Atoi(operand)
+			intOperand, err := strconv.Atoi(operand)
+			if err != nil {
+				panic(err)
+			}
 			intLineOperands = append(intLineOperands, intOperand)
 		}
 
 		operands = append(operands, intLineOperands)
 	}
 
+	// verticalTotals will hold the sum or product of the operands in each column
 	verticalTotals := make([]int, len(operands[0]), len(operands[0]))
 
 	for i := 0; i < len(operands); i++ {
@@ -96,43 +95,53 @@ func main() {
 		partOneTotal += v
 	}
 
+	// In Part Two, the columns are read from right-to-left in columns
+	// So we need to transpose the operands and operators to make them readable left-to-right
 	runeOperands = transposeRuneOperands(runeOperands)
-
 	slices.Reverse(operators)
 
 	reverseCol := 0
-	grabFirstValue := true
-	localTotal := 0
+	isFirstValue := true
+	columnSum := 0
 	partTwoTotal := 0
 
 	for i := range runeOperands {
 		reversedOperand := string(runeOperands[i])
-		intReversedOperand, _ := strconv.Atoi(strings.ReplaceAll(reversedOperand, " ", ""))
+		cleanedOperand := strings.ReplaceAll(reversedOperand, " ", "")
+
+		var intReversedOperand int
+		if cleanedOperand != "" {
+			var err error
+			intReversedOperand, err = strconv.Atoi(cleanedOperand)
+			if err != nil {
+				panic(err)
+			}
+		}
 
 		if intReversedOperand != 0 {
 			if i == len(runeOperands)-1 {
 				if operators[reverseCol] == "+" {
-					localTotal += intReversedOperand
+					columnSum += intReversedOperand
 				} else if operators[reverseCol] == "*" {
-					localTotal *= intReversedOperand
+					columnSum *= intReversedOperand
 				}
 
-				partTwoTotal += localTotal
+				partTwoTotal += columnSum
 				break
 			}
 
-			if grabFirstValue == true {
-				localTotal = intReversedOperand
-				grabFirstValue = false
+			if isFirstValue == true {
+				columnSum = intReversedOperand
+				isFirstValue = false
 			} else if operators[reverseCol] == "+" {
-				localTotal += intReversedOperand
+				columnSum += intReversedOperand
 			} else if operators[reverseCol] == "*" {
-				localTotal *= intReversedOperand
+				columnSum *= intReversedOperand
 			}
 		} else {
-			partTwoTotal += localTotal
-			localTotal = 0
-			grabFirstValue = true
+			partTwoTotal += columnSum
+			columnSum = 0
+			isFirstValue = true
 			reverseCol++
 		}
 	}

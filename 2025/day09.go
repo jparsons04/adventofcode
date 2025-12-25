@@ -201,7 +201,10 @@ func main() {
 		posFloat := make([]float64, len(tile))
 
 		for i, v := range tile {
-			val, _ := strconv.Atoi(v)
+			val, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
 			posFloat[i] = float64(val)
 		}
 

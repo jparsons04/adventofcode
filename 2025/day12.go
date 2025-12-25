@@ -468,7 +468,10 @@ func parseInput(sc *bufio.Scanner) []Region {
 				presentShape = []Point{}
 				presentRow = 0
 				indexLine := strings.Split(line, ":")
-				index, _ := strconv.Atoi(indexLine[0])
+				index, err := strconv.Atoi(indexLine[0])
+				if err != nil {
+					panic(err)
+				}
 				currentPresent.Index = index
 			} else if strings.Contains(line, "#") {
 				for i, r := range line {
@@ -489,14 +492,23 @@ func parseInput(sc *bufio.Scanner) []Region {
 
 			regionLine := strings.Split(line, ":")
 			regionDimensions := strings.Split(regionLine[0], "x")
-			regionWidth, _ := strconv.Atoi(regionDimensions[0])
-			regionLength, _ := strconv.Atoi(regionDimensions[1])
+			regionWidth, err := strconv.Atoi(regionDimensions[0])
+			if err != nil {
+				panic(err)
+			}
+			regionLength, err := strconv.Atoi(regionDimensions[1])
+			if err != nil {
+				panic(err)
+			}
 			currentRegion.Width = regionWidth
 			currentRegion.Length = regionLength
 
 			regionPresentCounts := strings.Split(strings.TrimSpace(regionLine[1]), " ")
 			for i, strCount := range regionPresentCounts {
-				intCount, _ := strconv.Atoi(strCount)
+				intCount, err := strconv.Atoi(strCount)
+				if err != nil {
+					panic(err)
+				}
 				currentRegionPresentCounts[i] = intCount
 			}
 
@@ -521,7 +533,7 @@ func main() {
 
 	regions := parseInput(sc)
 
-	numWorkers := 6
+	numWorkers := 2
 
 	type result struct {
 		regionNum   int

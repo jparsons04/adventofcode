@@ -8,6 +8,9 @@ import (
 	"strconv"
 )
 
+// turnOnBatteriesInBank uses a greedy algorithm to find the best ratings in the bank
+// by iterating through the bank and selecting the highest rating at each position
+// until the desired number of batteries are found while maintaining the order of the ratings.
 func turnOnBatteriesInBank(bank string, numBatteriesToFind int) int {
 	var bestRatings []int
 	lastSelectedPos := -1
@@ -21,7 +24,10 @@ func turnOnBatteriesInBank(bank string, numBatteriesToFind int) int {
 		bestPos := -1
 
 		for bankPos := searchStartPos; bankPos < searchEndPos; bankPos++ {
-			intBankPos, _ := strconv.Atoi(string(bank[bankPos]))
+			intBankPos, err := strconv.Atoi(string(bank[bankPos]))
+			if err != nil {
+				panic(err)
+			}
 			if intBankPos > bestRating {
 				bestRating = intBankPos
 				bestPos = bankPos
@@ -37,7 +43,10 @@ func turnOnBatteriesInBank(bank string, numBatteriesToFind int) int {
 		resultStr += strconv.Itoa(rating)
 	}
 
-	intResult, _ := strconv.Atoi(resultStr)
+	intResult, err := strconv.Atoi(resultStr)
+	if err != nil {
+		panic(err)
+	}
 
 	return intResult
 }

@@ -12,9 +12,9 @@ import (
 func partOne(intFirst int, intSecond int) int {
 	invalidIDSum := 0
 	for i := intFirst; i <= intSecond; i++ {
-		v := strings.TrimSpace(strconv.Itoa(i))
+		trimmedValue := strings.TrimSpace(strconv.Itoa(i))
 
-		if v[:len(v)/2] == v[len(v)/2:] {
+		if trimmedValue[:len(trimmedValue)/2] == trimmedValue[len(trimmedValue)/2:] {
 			invalidIDSum += i
 		}
 	}
@@ -39,12 +39,12 @@ func isInvalid(value string, seqToCheck string, seqLength int) bool {
 func partTwo(intFirst int, intSecond int) int {
 	invalidIDSum := 0
 	for i := intFirst; i <= intSecond; i++ {
-		v := strings.TrimSpace(strconv.Itoa(i))
+		trimmedValue := strings.TrimSpace(strconv.Itoa(i))
 
-		for valLength := 1; valLength < len(v); valLength++ {
-			seqToCheck := string(v[:valLength])
+		for valLength := 1; valLength < len(trimmedValue); valLength++ {
+			seqToCheck := string(trimmedValue[:valLength])
 
-			isInvalid := isInvalid(v, seqToCheck, valLength)
+			isInvalid := isInvalid(trimmedValue, seqToCheck, valLength)
 
 			if isInvalid {
 				invalidIDSum += i
@@ -77,10 +77,16 @@ func main() {
 			ids := strings.Split(r, "-")
 
 			strFirst := strings.TrimSpace(ids[0])
-			intFirst, _ := strconv.Atoi(strFirst)
+			intFirst, err := strconv.Atoi(strFirst)
+			if err != nil {
+				panic(err)
+			}
 
 			strSecond := strings.TrimSpace(ids[1])
-			intSecond, _ := strconv.Atoi(strSecond)
+			intSecond, err := strconv.Atoi(strSecond)
+			if err != nil {
+				panic(err)
+			}
 
 			// invalid IDs must have even lengths in part one
 			if len(ids[0])%2 == 0 || len(ids[1])%2 == 0 {

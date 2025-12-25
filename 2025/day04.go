@@ -7,10 +7,6 @@ import (
 	"path/filepath"
 )
 
-type floorCoord struct {
-	content string
-}
-
 func getNeighborPaperRolls(grid [][]byte, x int, y int) int {
 	rollsFound := 0
 	for yPos := -1; yPos <= 1; yPos++ {
@@ -45,9 +41,7 @@ func sweepRoomToRemovePaperRolls(grid [][]byte, remove bool) int {
 
 					// Remove the paper roll if it can be removed
 					if remove {
-						gridRow := []byte(grid[y])
-						gridRow[x] = '.'
-						grid[y] = gridRow
+						grid[y][x] = '.'
 					}
 				}
 			}

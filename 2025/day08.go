@@ -95,10 +95,12 @@ func modifyCircuits(
 
 }
 
+const maxConnections = 1000
+
 func partOne(junctionBoxPairs []JunctionBoxPair) ([][]JunctionBoxPos, int) {
 	var circuits [][]JunctionBoxPos
 
-	var numberofConnections int
+	var numberOfConnections int
 	var nextJunctionBoxPair int
 
 	for i := range len(junctionBoxPairs) {
@@ -124,11 +126,11 @@ func partOne(junctionBoxPairs []JunctionBoxPair) ([][]JunctionBoxPos, int) {
 			circuits = modifyCircuits(circuits, circuitIdx1, circuitIdx2, junctionBoxPos1, junctionBoxPos2)
 
 			// Count every connection attempt
-			numberofConnections++
+			numberOfConnections++
 		}
 
 		// Stop after 1000 connections
-		if numberofConnections == 1000 {
+		if numberOfConnections == maxConnections {
 			nextJunctionBoxPair = i + 1
 			break
 		}
@@ -197,7 +199,10 @@ func main() {
 		posFloat := make([]float64, len(line))
 
 		for i, v := range line {
-			val, _ := strconv.Atoi(v)
+			val, err := strconv.Atoi(v)
+			if err != nil {
+				panic(err)
+			}
 			posFloat[i] = float64(val)
 		}
 

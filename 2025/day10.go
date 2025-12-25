@@ -469,7 +469,10 @@ func getMachineButtons(s string) []Button {
 				intPositionsAffected := make([]int, len(positionsAffected))
 
 				for i, v := range positionsAffected {
-					val, _ := strconv.Atoi(v)
+					val, err := strconv.Atoi(v)
+					if err != nil {
+						panic(err)
+					}
 					intPositionsAffected[i] = int(val)
 				}
 
@@ -498,7 +501,10 @@ func getDesiredJoltageLevels(s string) []JoltageCounter {
 			joltageLevels := strings.Split(s[i+1:j], ",")
 
 			for _, v := range joltageLevels {
-				val, _ := strconv.Atoi(v)
+				val, err := strconv.Atoi(v)
+				if err != nil {
+					panic(err)
+				}
 				targetJoltageLevels = append(targetJoltageLevels, JoltageCounter{
 					TargetValue: val,
 				})

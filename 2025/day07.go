@@ -12,6 +12,10 @@ type Room map[int]map[int]rune
 var calculatedPositions = make(map[int]map[int]int)
 
 func (r Room) countTimelines(row, col int) int {
+	if row < 0 || row >= len(r) {
+		return 0
+	}
+
 	if row == len(r)-1 {
 		return 1
 	}
