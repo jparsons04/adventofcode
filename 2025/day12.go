@@ -2,24 +2,26 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // Heavily inspired by https://github.com/lamasalah32/pentomino-tiling
-// Adapted to work with the input's provided polyominos of present shapes
+// Adapted to work with the input's provided polyominos of present shapes. For
+// Algorithm X, this implementation uses primary columns for present instances
+// that must be covered exactly once, and secondary columns for grid positions
+// that can be covered at most once.
 
 // ========================
 // Polyomino implementation
 
-var allPresents []Present
-
-var PresentIndexToIndex = make(map[int]int)
-var IndexToPresentIndex = make(map[int]int)
+var allPresentTypes []Present
 
 type Point struct {
 	X int
@@ -31,9 +33,9 @@ type Present struct {
 	Points []Point
 }
 
-type Choices struct {
-	N   int
-	Pos []int
+type Choice struct {
+	Pos                  []int
+	PresentInstanceIndex int
 }
 
 func Rotate(p Present) Present {
@@ -54,28 +56,92 @@ func Flip(p Present) Present {
 	return Present{Index: p.Index, Points: newPoints}
 }
 
-func GenOrientations(p Present) []Present {
-	var orientations []Present
-
-	curr := p
-	// Each present can be rotated 90 degrees and each rotation can be flipped
-	for i := 0; i < 4; i++ {
-		curr = Rotate(curr)
-		orientations = append(orientations, curr)
-
-		flipped := Flip(curr)
-		orientations = append(orientations, flipped)
+// Normalize translates the present so that the minimum X and Y are both 0
+func Normalize(p Present) Present {
+	if len(p.Points) == 0 {
+		return p
 	}
 
-	return orientations
+	minX, minY := p.Points[0].X, p.Points[0].Y
+	for _, pt := range p.Points {
+		if pt.X < minX {
+			minX = pt.X
+		}
+		if pt.Y < minY {
+			minY = pt.Y
+		}
+	}
+
+	normalized := make([]Point, len(p.Points))
+	for i, pt := range p.Points {
+		normalized[i] = Point{X: pt.X - minX, Y: pt.Y - minY}
+	}
+
+	return Present{Index: p.Index, Points: normalized}
 }
 
-func isValidPlacement(i, j, w, h int, o Present) bool {
-	for k := range o.Points {
-		xEnd := o.Points[k].X + i
-		yEnd := o.Points[k].Y + j
+// CanonicalString creates a unique string representation for a normalized present
+func CanonicalString(p Present) string {
+	points := make([]Point, len(p.Points))
+	copy(points, p.Points)
 
-		if xEnd < 0 || xEnd >= w || yEnd < 0 || yEnd >= h {
+	// Sort points by Y first, then X for consistent ordering
+	for i := range len(points) {
+		for j := i + 1; j < len(points); j++ {
+			if points[j].Y < points[i].Y || (points[j].Y == points[i].Y && points[j].X < points[i].X) {
+				points[i], points[j] = points[j], points[i]
+			}
+		}
+	}
+
+	var s strings.Builder
+	for _, pt := range points {
+		s.WriteString(fmt.Sprintf("(%d,%d)", pt.X, pt.Y))
+	}
+	return s.String()
+}
+
+// GenOrientations generates all possible orientations of a present
+// Each present can be rotated 90 degrees and each rotation can be flipped
+// Orientations are deduplicated by normalizing and comparing canonical strings
+func GenOrientations(p Present) []Present {
+	var allOrientations []Present
+
+	curr := p
+	// Each present can be rotated 90 degrees (4 unique rotations) and each rotation can be flipped
+	for range 4 {
+		curr = Rotate(curr)
+		allOrientations = append(allOrientations, curr)
+
+		flipped := Flip(curr)
+		allOrientations = append(allOrientations, flipped)
+	}
+
+	// Deduplicate orientations by normalizing and comparing canonical strings
+	seen := make(map[string]bool)
+	var uniqueOrientations []Present
+
+	for _, orientation := range allOrientations {
+		normalizedOrientation := Normalize(orientation)
+		canonical := CanonicalString(normalizedOrientation)
+
+		if !seen[canonical] {
+			seen[canonical] = true
+			uniqueOrientations = append(uniqueOrientations, orientation)
+		}
+	}
+
+	return uniqueOrientations
+}
+
+// isValidPlacement checks if a present can be placed at a given position
+// without exceeding the bounds of the region
+func isValidPlacement(i, j, width, length int, p Present) bool {
+	for pointIdx := range p.Points {
+		xEnd := p.Points[pointIdx].X + i
+		yEnd := p.Points[pointIdx].Y + j
+
+		if xEnd < 0 || xEnd >= width || yEnd < 0 || yEnd >= length {
 			return false
 		}
 	}
@@ -83,73 +149,85 @@ func isValidPlacement(i, j, w, h int, o Present) bool {
 	return true
 }
 
-func FindPresents(presents []int) []Present {
-	found := make([]Present, 0, len(presents))
-	set := make(map[int]struct{})
+// FindPresents creates a list of presents to be used for the incidence matrix
+// The present types are available in the allPresentTypes global variable
+func FindPresents(presentCounts map[int]int) []Present {
+	presents := make([]Present, 0)
 
-	for _, name := range presents {
-		set[name] = struct{}{}
-	}
-
-	k := 0
-	for _, p := range allPresents {
-		if _, ok := set[p.Index]; ok {
-			found = append(found, p)
-			PresentIndexToIndex[p.Index] = k
-			IndexToPresentIndex[k] = p.Index
-			k++
+	for presentIndex, count := range presentCounts {
+		for range count {
+			presents = append(presents, allPresentTypes[presentIndex])
 		}
 	}
 
-	return found
+	return presents
 }
 
-func GenChoices(w, h int, presents []int) []Choices {
-	c := make([]Choices, 0)
-	p := FindPresents(presents)
+// GenChoices creates a list of choices to be used for the incidence matrix
+// Choices are the possible placements of presents in the region
+func GenChoices(width, length int, region Region) []Choice {
+	choices := make([]Choice, 0)
+	presents := FindPresents(region.PresentCount)
 
-	for i := 0; i < w; i++ {
-		for j := 0; j < h; j++ {
-			for k := range p {
-				orientations := GenOrientations(p[k])
-				for l := range orientations {
-					if isValidPlacement(i, j, w, h, orientations[l]) {
-						pos := make([]int, len(orientations[l].Points))
-						for m := range orientations[l].Points {
-							pos[m] = (orientations[l].Points[m].Y+j)*w + (orientations[l].Points[m].X + i)
+	// Cache orientations per present type to avoid redundant computation
+	orientationCache := make(map[int][]Present)
+	for presentIdx := range presents {
+		presentType := presents[presentIdx].Index
+		if _, exists := orientationCache[presentType]; !exists {
+			orientationCache[presentType] = GenOrientations(presents[presentIdx])
+		}
+	}
+
+	for rowIdx := range width {
+		for colIdx := range length {
+			for presentInstanceIdx := range presents {
+				orientations := orientationCache[presents[presentInstanceIdx].Index]
+				for orientationIdx := range orientations {
+					if isValidPlacement(rowIdx, colIdx, width, length, orientations[orientationIdx]) {
+						pos := make([]int, len(orientations[orientationIdx].Points))
+						for pointIdx := range orientations[orientationIdx].Points {
+							pos[pointIdx] = (orientations[orientationIdx].Points[pointIdx].Y+colIdx)*width + (orientations[orientationIdx].Points[pointIdx].X + rowIdx)
 						}
 
-						c = append(c, Choices{N: orientations[l].Index, Pos: pos})
+						choices = append(choices, Choice{
+							Pos:                  pos,
+							PresentInstanceIndex: presentInstanceIdx,
+						})
 					}
 				}
 			}
 		}
 	}
 
-	return c
+	return choices
 }
 
 // ===============================
 // Incidence matrix implementation
-// The matrix used in Algorithm X to solve for the exact cover problem
+// Note that this matrix is used in Algorithm X to solve a slight variation of the exact cover problem
+// Exact cover is not required here, so dancing links column headers are either marked as primary or secondary
+// Columns for present instances must be covered exactly once
+// Columns for grid positions can be covered at most once
 
-func GenMatrix(w, h int, presents []int) [][]bool {
-	choices := GenChoices(w, h, presents)
-
-	for i, c := range choices {
-		fmt.Printf("choice %d: %+v\n", i, c)
-	}
-
+// GenMatrix builds the incidence matrix for a given region
+// The matrix is a boolean matrix where each row represents a choice and each column represents a present instance or a grid position
+func GenMatrix(width, length int, region Region) [][]bool {
+	choices := GenChoices(width, length, region)
 	matrix := make([][]bool, len(choices))
 
-	for i := range matrix {
-		matrix[i] = make([]bool, len(presents)+w*h)
+	var presentCount int
+	for _, count := range region.PresentCount {
+		presentCount += count
 	}
 
-	for j := range choices {
-		matrix[j][w*h+PresentIndexToIndex[choices[j].N]] = true
-		for k := range choices[j].Pos {
-			matrix[j][choices[j].Pos[k]] = true
+	for rowIdx := range matrix {
+		matrix[rowIdx] = make([]bool, presentCount+width*length)
+	}
+
+	for choiceIdx := range choices {
+		matrix[choiceIdx][choices[choiceIdx].PresentInstanceIndex] = true
+		for posIdx := range choices[choiceIdx].Pos {
+			matrix[choiceIdx][presentCount+choices[choiceIdx].Pos[posIdx]] = true
 		}
 	}
 
@@ -168,46 +246,56 @@ type Node struct {
 
 type Header struct {
 	Node
-	L, R *Header
-	S    int
-	N    int
+	L, R      *Header
+	S         int
+	N         int
+	IsPrimary bool
 }
 
+// ChooseColumn chooses the column with the smallest size that is primary
 func ChooseColumn(h *Header) *Header {
-	c := h.R
-	s := c.S
+	var c *Header
+	smallestSize := int(^uint(0) >> 1)
 
-	for j := c.R; j != h; j = j.R {
-		col := j
+	for col := h.R; col != h; col = col.R {
+		if !col.IsPrimary {
+			continue
+		}
 
-		if col.S < s {
+		if c == nil || col.S < smallestSize {
 			c = col
-			s = col.S
+			smallestSize = col.S
 		}
 	}
 
 	return c
 }
 
+// Cover covers a column in the dancing links matrix
+// It removes the column from the matrix by updating the pointers of the nodes in the column
+// and the nodes in the rows that contain the column
 func Cover(h *Header) {
 	h.R.L = h.L
 	h.L.R = h.R
 
-	for i := h.D; i != &h.Node; i = i.D {
-		for j := i.R; j != i; j = j.R {
-			j.D.U = j.U
-			j.U.D = j.D
-			j.C.S--
+	for row := h.D; row != &h.Node; row = row.D {
+		for col := row.R; col != row; col = col.R {
+			col.D.U = col.U
+			col.U.D = col.D
+			col.C.S--
 		}
 	}
 }
 
+// Uncover uncovers a column in the dancing links matrix
+// It restores the column to the matrix by updating the pointers of the nodes in the column
+// and the nodes in the rows that contain the column
 func Uncover(h *Header) {
-	for i := h.U; i != &h.Node; i = i.U {
-		for j := i.L; j != i; j = j.L {
-			j.C.S++
-			j.D.U = j
-			j.U.D = j
+	for row := h.U; row != &h.Node; row = row.U {
+		for col := row.L; col != row; col = col.L {
+			col.C.S++
+			col.D.U = col
+			col.U.D = col
 		}
 	}
 
@@ -215,8 +303,9 @@ func Uncover(h *Header) {
 	h.L.R = h
 }
 
-func BuildDLX(matrix [][]bool) *Header {
-	w := len(matrix[0])
+// BuildDLX builds the dancing links matrix for a given region
+func BuildDLX(matrix [][]bool, presentLen int) *Header {
+	numColumns := len(matrix[0])
 
 	root := &Header{N: -1}
 	root.L = root
@@ -225,127 +314,129 @@ func BuildDLX(matrix [][]bool) *Header {
 	root.D = &root.Node
 	root.C = root
 
-	headers := make([]*Header, w)
+	headers := make([]*Header, numColumns)
 	prev := root
 
-	for i := range w {
-		h := &Header{N: i}
-		h.C = h
-		h.S = 0
-
-		h.U = &h.Node
-		h.D = &h.Node
-
-		h.L = prev
-		h.R = root
-		prev.R = h
-		root.L = h
-
-		headers[i] = h
-		prev = h
+	for i := range numColumns {
+		header := &Header{N: i}
+		header.C = header
+		header.S = 0
+		header.U = &header.Node
+		header.D = &header.Node
+		header.L = prev
+		header.R = root
+		prev.R = header
+		root.L = header
+		headers[i] = header
+		prev = header
+		if i < presentLen {
+			header.IsPrimary = true
+		}
 	}
 
 	for _, row := range matrix {
 		var first, last *Node
 
-		for j, val := range row {
+		for colIdx, val := range row {
 			if val {
-				h := headers[j]
-				n := &Node{C: h}
+				header := headers[colIdx]
+				node := &Node{C: header}
 
-				n.D = &h.Node
-				n.U = h.Node.U
-				h.Node.U.D = n
-				h.Node.U = n
-				h.S++
+				node.D = &header.Node
+				node.U = header.Node.U
+				header.Node.U.D = node
+				header.Node.U = node
+				header.S++
 
 				if first == nil {
-					first = n
-					last = n
-					n.L = n
-					n.R = n
+					first = node
+					last = node
+					node.L = node
+					node.R = node
 				} else {
-					n.L = last
-					n.R = first
-					last.R = n
-					first.L = n
-					last = n
+					node.L = last
+					node.R = first
+					last.R = node
+					first.L = node
+					last = node
 				}
 			}
+		}
+	}
+
+	// Check for unsolvable constraints: any primary column with 0 choices
+	for rootHeader := root.R; rootHeader != root; rootHeader = rootHeader.R {
+		// If a required present has no valid placements, the region is unsolvable
+		if rootHeader.IsPrimary && rootHeader.S == 0 {
+			return nil
 		}
 	}
 
 	return root
 }
 
-func SolveDLX(h *Header, k int, solution []*Node) [][]*Node {
-	if h.R == h {
+// SolveDLXRecursive solves the dancing links matrix using Algorithm X
+// It recursively covers and uncovers columns to find a solution
+func SolveDLXRecursive(h *Header, k int, solution []*Node) [][]*Node {
+	// Base case: if all primary columns are covered, a solution has been found
+	allPrimaryColsCovered := true
+	for r := h.R; r != h; r = r.R {
+		if r.IsPrimary {
+			allPrimaryColsCovered = false
+			break
+		}
+	}
+
+	if allPrimaryColsCovered {
 		solCopy := make([]*Node, len(solution))
 		copy(solCopy, solution)
 		return [][]*Node{solCopy}
 	}
 
-	var res [][]*Node
 	c := ChooseColumn(h)
 	Cover(c)
 
-	for r := c.D; r != &c.Node; r = r.D {
-		solution = append(solution, r)
+	for row := c.D; row != &c.Node; row = row.D {
+		solution = append(solution, row)
 
-		for j := r.R; j != r; j = j.R {
-			Cover(j.C)
+		for col := row.R; col != row; col = col.R {
+			Cover(col.C)
 		}
 
-		res = append(res, SolveDLX(h, k+1, solution)...)
+		res := SolveDLXRecursive(h, k+1, solution)
+		if len(res) > 0 {
+			Uncover(c)
+			return res
+		}
+
 		solution = solution[:len(solution)-1]
 
-		for j := r.L; j != r; j = j.L {
-			Uncover(j.C)
+		for col := row.L; col != row; col = col.L {
+			Uncover(col.C)
 		}
 	}
 
 	Uncover(c)
-	return res
+	return nil
 }
 
-func PrintSolutions(width, height int, solutions [][]*Node) {
-	region := make([][]string, height)
-	for i := range region {
-		region[i] = make([]string, width)
-	}
+// SolveDLX solves the dancing links matrix using Algorithm X
+func SolveDLX(h *Header) ([][]*Node, bool) {
+	resultChan := make(chan [][]*Node, 1)
 
-	i := rand.Intn(len(solutions))
-	sol := solutions[i]
+	go func() {
+		result := SolveDLXRecursive(h, 0, nil)
+		resultChan <- result
+	}()
 
-	for _, node := range sol {
-		var ch string
-		for j := node; ; j = j.R {
-			if j.C.N >= width*height {
-				ch = strconv.Itoa(IndexToPresentIndex[j.C.N-width*height])
-				break
-			}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-			if j.R == node {
-				break
-			}
-		}
-
-		for j := node; ; j = j.R {
-			if j.C.N < width*height {
-				pos := j.C.N
-				x := pos % width
-				y := pos / width
-				region[y][x] = ch
-			}
-
-			if j.R == node {
-				break
-			}
-		}
-	}
-
-	for i := range region {
-		fmt.Println(region[i])
+	select {
+	case result := <-resultChan:
+		return result, true
+	case <-ctx.Done():
+		return nil, false
 	}
 }
 
@@ -357,17 +448,12 @@ type Region struct {
 	PresentCount map[int]int
 }
 
-func main() {
-	filePath := filepath.Join("inputs/day12-example.txt")
-	f, err := os.Open(filePath)
-	if err != nil {
-		panic(err)
-	}
-
-	defer f.Close()
-
-	sc := bufio.NewScanner(f)
-
+// ParseInput parses the input file and returns a list of regions
+// The input file is a list of present shapes and regions
+// The present shapes are defined by a list of points that are marked with '#'
+// The regions are defined by a width and length and a list of present counts
+// The present counts are the number of times each present type must be present in the region
+func parseInput(sc *bufio.Scanner) []Region {
 	var regions []Region
 
 	var currentPresent Present
@@ -395,7 +481,7 @@ func main() {
 				presentRow++
 			} else if len(line) == 0 {
 				currentPresent.Points = presentShape
-				allPresents = append(allPresents, currentPresent)
+				allPresentTypes = append(allPresentTypes, currentPresent)
 			}
 		} else {
 			// Then collect the regions
@@ -420,23 +506,105 @@ func main() {
 		}
 	}
 
-	width := 12
-	height := 5
-	testPresents := []int{0}
-	matrix := GenMatrix(width, height, testPresents)
-	root := BuildDLX(matrix)
-	solutions := SolveDLX(root, 0, nil)
+	return regions
+}
 
-	fmt.Printf("len solutions: %d\n", len(solutions))
-
-	if len(solutions) > 0 {
-		PrintSolutions(width, height, solutions)
+func main() {
+	filePath := filepath.Join("inputs/day12.txt")
+	f, err := os.Open(filePath)
+	if err != nil {
+		panic(err)
 	}
 
-	//for i, present := range presents {
-	//	fmt.Printf("i: %d\n", i)
-	//	fmt.Printf("present: %+v\n", present)
-	//}
+	defer f.Close()
 
-	//fmt.Printf("regions: %+v\n\n", regions)
+	sc := bufio.NewScanner(f)
+
+	regions := parseInput(sc)
+
+	numWorkers := runtime.NumCPU()
+
+	type result struct {
+		regionNum   int
+		hasSolution bool
+		status      string
+	}
+
+	jobsChan := make(chan int, len(regions))
+	resultsChan := make(chan result, len(regions))
+	var wg sync.WaitGroup
+
+	// Worker pool
+	for range numWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobsChan {
+				region := regions[i]
+				width := region.Width
+				length := region.Length
+
+				// Quick feasibility check: total polyomino cells must fit in region
+				totalPolyominoCells := 0
+				presentInstanceCount := 0
+				for presentIdx, count := range region.PresentCount {
+					if count > 0 && presentIdx < len(allPresentTypes) {
+						cellsPerPresent := len(allPresentTypes[presentIdx].Points)
+						totalPolyominoCells += count * cellsPerPresent
+						presentInstanceCount += count
+					}
+				}
+
+				regionArea := width * length
+
+				if totalPolyominoCells > regionArea {
+					resultsChan <- result{i + 1, false, "Impossible (too many cells)"}
+					continue
+				}
+
+				matrix := GenMatrix(width, length, region)
+				root := BuildDLX(matrix, presentInstanceCount)
+
+				if root == nil {
+					resultsChan <- result{i + 1, false, "Unsolvable (no valid placements)"}
+					continue
+				}
+
+				solutions, completed := SolveDLX(root)
+
+				if !completed {
+					resultsChan <- result{i + 1, false, "Context cancelled"}
+				} else if len(solutions) > 0 {
+					resultsChan <- result{i + 1, true, "Solution found"}
+				} else {
+					resultsChan <- result{i + 1, false, "No solution"}
+				}
+			}
+		}()
+	}
+
+	// Send jobs
+	go func() {
+		for i := range regions {
+			jobsChan <- i
+		}
+		close(jobsChan)
+	}()
+
+	go func() {
+		wg.Wait()
+		close(resultsChan)
+	}()
+
+	// Collect results
+	var partOneValidRegions int
+	for range regions {
+		r := <-resultsChan
+		fmt.Printf("Region %d: %s\n", r.regionNum, r.status)
+		if r.hasSolution {
+			partOneValidRegions++
+		}
+	}
+
+	fmt.Printf("\nPart one, number of valid regions: %d\n", partOneValidRegions)
 }
