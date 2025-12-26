@@ -166,7 +166,9 @@ func FindPresents(presentCounts map[int]int) []Present {
 // SparseRow represents a row in the incidence matrix, but instead of storing a
 // boolean for each column, we store the index of the column that is true.
 type SparseRow struct {
-	TrueColumns []int
+	TrueColumns   []int
+	GridPositions []int
+	PresentIdx    int
 }
 
 // ============================
@@ -174,9 +176,10 @@ type SparseRow struct {
 // Used for backtracking as part of utilizing Algorithm X
 
 type Node struct {
-	L, R *Node
-	U, D *Node
-	C    *Header
+	L, R     *Node
+	U, D     *Node
+	C        *Header
+	RowIndex int
 }
 
 type Header struct {
@@ -270,11 +273,14 @@ func BuildDLXSparse(sparseRows []SparseRow, numPrimaryColumns, numColumns int) *
 		}
 	}
 
-	for _, row := range sparseRows {
+	for rowIdx, row := range sparseRows {
 		var rowStart *Node
 
 		for _, colIdx := range row.TrueColumns {
-			node := &Node{C: headers[colIdx]}
+			node := &Node{
+				C:        headers[colIdx],
+				RowIndex: rowIdx,
+			}
 
 			node.U = headers[colIdx].U
 			node.D = &headers[colIdx].Node
@@ -311,31 +317,36 @@ func InitializeOrientationCache() {
 // valid placement of a present, a sparse row is added to the matrix. The
 // primary column is the present instance, and the secondary columns are the
 // grid positions that will be occupied.
-func BuildDLXStreamed(region Region) *Header {
+func BuildDLXStreamed(region Region) (*Header, []SparseRow) {
 	width := region.Width
 	length := region.Length
 
 	sparseRows := make([]SparseRow, 0)
 	presents := FindPresents(region.PresentCount)
 
-	for rowIdx := range width {
-		for colIdx := range length {
+	for yIdx := range length {
+		for xIdx := range width {
 			for presentInstanceIdx := range presents {
 				orientations := globalOrientationCache[presents[presentInstanceIdx].Index]
 				for _, orientation := range orientations {
-					if isValidPlacement(rowIdx, colIdx, width, length, orientation) {
+					if isValidPlacement(xIdx, yIdx, width, length, orientation) {
 						trueColumns := make([]int, 0, len(orientation.Points)+1)
 						trueColumns = append(trueColumns, presentInstanceIdx)
 
-						for pointIdx := range orientation.Points {
-							gridPos := (orientation.Points[pointIdx].Y+colIdx)*width +
-								(orientation.Points[pointIdx].X + rowIdx)
+						gridPositions := make([]int, 0, len(orientation.Points))
 
+						for pointIdx := range orientation.Points {
+							gridPos := (orientation.Points[pointIdx].Y+yIdx)*width +
+								(orientation.Points[pointIdx].X + xIdx)
+
+							gridPositions = append(gridPositions, gridPos)
 							trueColumns = append(trueColumns, len(presents)+gridPos)
 						}
 
 						sparseRow := SparseRow{
-							TrueColumns: trueColumns,
+							TrueColumns:   trueColumns,
+							PresentIdx:    presents[presentInstanceIdx].Index,
+							GridPositions: gridPositions,
 						}
 
 						sparseRows = append(sparseRows, sparseRow)
@@ -347,19 +358,18 @@ func BuildDLXStreamed(region Region) *Header {
 
 	presentCount := len(presents)
 	numColumns := presentCount + (width * length)
-	return BuildDLXSparse(sparseRows, presentCount, numColumns)
+	return BuildDLXSparse(sparseRows, presentCount, numColumns), sparseRows
 }
 
 // SearchState represents the state of the DLX search at a particular point
 type SearchState struct {
-	column         *Header
-	currentRow     *Node
-	solution       []*Node
-	coveredColumns []*Header
+	column     *Header
+	currentRow *Node
+	solution   []*Node
+	phase      int // 0 = trying rows, 1 = backtracking
 }
 
 // SolveDLXIterative solves the dancing links matrix using Algorithm X iteratively
-// This tries to reduce memory usage by using a stack to store the state of the search
 func SolveDLXIterative(h *Header) [][]*Node {
 	// Base case: if all primary columns are covered, a solution has been found
 	allPrimaryColsCovered := true
@@ -382,39 +392,42 @@ func SolveDLXIterative(h *Header) [][]*Node {
 
 	Cover(initialColumn)
 	stack := []SearchState{{
-		column:         initialColumn,
-		currentRow:     initialColumn.D,
-		solution:       []*Node{},
-		coveredColumns: []*Header{initialColumn},
+		column:     initialColumn,
+		currentRow: initialColumn.D,
+		solution:   []*Node{},
+		phase:      0,
 	}}
 
 	for len(stack) > 0 {
 		state := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
 
+		if state.phase == 1 {
+			// Backtracking phase: uncover row columns in reverse order
+			for col := state.currentRow.L; col != state.currentRow; col = col.L {
+				Uncover(col.C)
+			}
+			continue
+		}
+
 		// Check if we've exhausted all rows in this column
 		if state.currentRow == &state.column.Node {
-			// Backtrack: uncover column and continue
+			// Uncover this column and backtrack
 			Uncover(state.column)
 			continue
 		}
 
 		// Try this row: add to solution and cover affected columns
-		newSolution := make([]*Node, len(state.solution)+1)
-		copy(newSolution, state.solution)
-		newSolution[len(state.solution)] = state.currentRow
+		newSolution := append([]*Node(nil), state.solution...)
+		newSolution = append(newSolution, state.currentRow)
 
-		newCoveredColumns := make([]*Header, len(state.coveredColumns))
-		copy(newCoveredColumns, state.coveredColumns)
-
-		// Cover all columns in this row
+		// Cover all other columns in this row (noting that state.column is already covered)
 		for col := state.currentRow.R; col != state.currentRow; col = col.R {
 			Cover(col.C)
-			newCoveredColumns = append(newCoveredColumns, col.C)
 		}
 
 		// Check if solution is complete
-		allPrimaryColsCovered := true
+		allPrimaryColsCovered = true
 		for r := h.R; r != h; r = r.R {
 			if r.IsPrimary {
 				allPrimaryColsCovered = false
@@ -423,38 +436,48 @@ func SolveDLXIterative(h *Header) [][]*Node {
 		}
 
 		if allPrimaryColsCovered {
-			// Found a solution, so clean up the covered columns and return the solution
-			for i := len(newCoveredColumns) - 1; i >= 0; i-- {
-				Uncover(newCoveredColumns[i])
+			// Found a solution, so uncover everything in reverse order
+			for col := state.currentRow.L; col != state.currentRow; col = col.L {
+				Uncover(col.C)
 			}
+
+			Uncover(state.column)
 
 			return [][]*Node{newSolution}
 		}
 
-		// Push backtrack state for this row
+		// Push two states: backtrack state first, then the state to uncover the row columns we just covered.
+		// 1. State to try next row in current column (for backtracking)
 		stack = append(stack, SearchState{
-			column:         state.column,
-			currentRow:     state.currentRow.D, // Next row to try
-			solution:       state.solution,
-			coveredColumns: state.coveredColumns,
+			column:     state.column,
+			currentRow: state.currentRow.D,
+			solution:   state.solution,
+			phase:      0,
 		})
 
-		// Choose next column and push its state
+		// 2. State to uncover the row columns we just covered.
+		stack = append(stack, SearchState{
+			column:     state.column,
+			currentRow: state.currentRow,
+			solution:   state.solution,
+			phase:      1,
+		})
+
+		// Choose next column and push its state (will run first due to stack order)
 		nextColumn := ChooseColumn(h)
 		if nextColumn != nil {
 			Cover(nextColumn)
-			newCoveredColumns = append(newCoveredColumns, nextColumn)
 			stack = append(stack, SearchState{
-				column:         nextColumn,
-				currentRow:     nextColumn.D,
-				solution:       newSolution,
-				coveredColumns: newCoveredColumns,
+				column:     nextColumn,
+				currentRow: nextColumn.D,
+				solution:   newSolution,
+				phase:      0,
 			})
 		} else {
-			// No column to choose, need to backtrack
-			// Uncover columns we just covered
-			for i := len(newCoveredColumns) - 1; i >= len(state.coveredColumns); i-- {
-				Uncover(newCoveredColumns[i])
+			// No column to choose - solution would be complete, but we already checked above
+			// This shouldn't happen, but if it does, uncover what we covered
+			for col := state.currentRow.L; col != state.currentRow; col = col.L {
+				Uncover(col.C)
 			}
 		}
 	}
@@ -462,9 +485,76 @@ func SolveDLXIterative(h *Header) [][]*Node {
 	return nil
 }
 
-// SolveDLX solves the dancing links matrix using Algorithm X
-func SolveDLX(h *Header) [][]*Node {
-	return SolveDLXIterative(h)
+// ====================================================
+// Reconstructing and rendering the solution from Nodes
+
+type Placement struct {
+	PresentIdx    int
+	GridPositions []int
+}
+
+func ReconstructSolution(solution []*Node, sparseRows []SparseRow, regionNum int) []Placement {
+	placements := make([]Placement, len(solution))
+
+	for i, node := range solution {
+		row := sparseRows[node.RowIndex]
+		placements[i] = Placement{
+			PresentIdx:    row.PresentIdx,
+			GridPositions: row.GridPositions,
+		}
+	}
+
+	return placements
+}
+
+// ANSI color codes
+var colors = []string{
+	"\033[31m", // Red
+	"\033[32m", // Green
+	"\033[33m", // Yellow
+	"\033[34m", // Blue
+	"\033[35m", // Magenta
+	"\033[36m", // Cyan
+	"\033[91m", // Bright Red
+	"\033[92m", // Bright Green
+	"\033[93m", // Bright Yellow
+	"\033[94m", // Bright Blue
+	"\033[95m", // Bright Magenta
+	"\033[96m", // Bright Cyan
+}
+
+const reset = "\033[0m"
+
+func RenderSolution(placements []Placement, width, height int) {
+	// Initialize the empty grid
+	grid := make([][]string, height)
+	for i := range grid {
+		grid[i] = make([]string, width)
+		for j := range grid[i] {
+			grid[i][j] = "."
+		}
+	}
+
+	runes := []string{"@", "#", "$", "%", "^", "&", "*", "+", "?", "/"}
+
+	for i, placement := range placements {
+		color := colors[i%len(colors)]
+		symbol := fmt.Sprintf("%s%v%s", color, runes[placement.PresentIdx%len(runes)], reset)
+
+		for _, gridPos := range placement.GridPositions {
+			row := gridPos / width
+			col := gridPos % width
+			grid[row][col] = symbol
+		}
+	}
+
+	// Print the grid
+	for _, row := range grid {
+		for _, cell := range row {
+			fmt.Print(cell)
+		}
+		fmt.Println()
+	}
 }
 
 // ==========================
@@ -570,6 +660,10 @@ func main() {
 		regionNum   int
 		hasSolution bool
 		status      string
+		solution    []*Node
+		sparseRows  []SparseRow
+		width       int
+		length      int
 	}
 
 	jobsChan := make(chan int, len(regions))
@@ -598,23 +692,23 @@ func main() {
 				regionArea := width * length
 
 				if totalPolyominoCells > regionArea {
-					resultsChan <- result{i + 1, false, "Impossible (too many cells)"}
+					resultsChan <- result{i + 1, false, "Impossible (too many cells)", nil, nil, 0, 0}
 					continue
 				}
 
-				root := BuildDLXStreamed(region)
+				root, sparseRows := BuildDLXStreamed(region)
 
 				if root == nil {
-					resultsChan <- result{i + 1, false, "Unsolvable (no valid placements)"}
+					resultsChan <- result{i + 1, false, "Unsolvable (no valid placements)", nil, nil, 0, 0}
 					continue
 				}
 
-				solutions := SolveDLX(root)
+				solutions := SolveDLXIterative(root)
 
 				if len(solutions) > 0 {
-					resultsChan <- result{i + 1, true, "Solution found"}
+					resultsChan <- result{i + 1, true, "Solution found", solutions[0], sparseRows, width, length}
 				} else {
-					resultsChan <- result{i + 1, false, "No solution"}
+					resultsChan <- result{i + 1, false, "No solution", nil, nil, 0, 0}
 				}
 			}
 		}()
@@ -640,6 +734,8 @@ func main() {
 		fmt.Printf("Region %d: %s\n", r.regionNum, r.status)
 		if r.hasSolution {
 			partOneValidRegions++
+			placements := ReconstructSolution(r.solution, r.sparseRows, r.regionNum)
+			RenderSolution(placements, r.width, r.length)
 		}
 	}
 
