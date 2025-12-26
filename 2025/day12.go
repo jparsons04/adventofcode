@@ -20,8 +20,6 @@ import (
 // ========================
 // Polyomino implementation
 
-var allPresentTypes []Present
-
 type Point struct {
 	X int
 	Y int
@@ -143,6 +141,8 @@ func isValidPlacement(i, j, width, length int, p Present) bool {
 	return true
 }
 
+var allPresentTypes []Present
+
 // FindPresents creates a list of presents to be used for the incidence matrix
 // The present types are available in the allPresentTypes global variable
 func FindPresents(presentCounts map[int]int) []Present {
@@ -165,7 +165,7 @@ func FindPresents(presentCounts map[int]int) []Present {
 // Columns for grid positions can be covered at most once
 
 // SparseRow represents a row in the incidence matrix, but instead of storing a
-// boolean for each column, we store the index of the column that is true.
+// boolean for each column, we store the index of the columns that are true.
 type SparseRow struct {
 	TrueColumns   []int
 	GridPositions []int
@@ -242,10 +242,10 @@ func Uncover(h *Header) {
 	h.L.R = h
 }
 
-// BuildDLXSparse builds the dancing links matrix for a given list of sparse rows
-// which are built in BuildDLXStreamed.
-// The primary columns are the present instances, and the secondary columns are the
-// grid positions that will be occupied.
+// BuildDLXSparse builds the dancing links matrix for a given list of sparse
+// rows which are built in BuildDLXStreamed. The primary columns are the
+// present instances, and the secondary columns are the grid positions that
+// will be occupied.
 func BuildDLXSparse(sparseRows []SparseRow, numPrimaryColumns, numColumns int) *Header {
 	root := &Header{N: -1}
 	root.L = root
@@ -314,8 +314,8 @@ func InitializeOrientationCache() {
 	}
 }
 
-// BuildDLXStreamed builds the dancing links matrix for a given region For each
-// valid placement of a present, a sparse row is added to the matrix. The
+// BuildDLXStreamed builds the dancing links matrix for a given region. For
+// each valid placement of a present, a sparse row is added to the matrix. The
 // primary column is the present instance, and the secondary columns are the
 // grid positions that will be occupied.
 func BuildDLXStreamed(region Region) (*Header, []SparseRow) {
