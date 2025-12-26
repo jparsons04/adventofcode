@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -535,11 +536,11 @@ func RenderSolution(placements []Placement, width, height int) {
 		}
 	}
 
-	runes := []string{"@", "#", "$", "%", "^", "&", "*", "+", "?", "/"}
+	presentChars := []string{"@", "#", "$", "%", "&", "?", "O", "X", "☺︎", "☻", "♥︎", "♦︎", "♣︎", "♠︎"}
 
-	for i, placement := range placements {
-		color := colors[i%len(colors)]
-		symbol := fmt.Sprintf("%s%v%s", color, runes[placement.PresentIdx%len(runes)], reset)
+	for _, placement := range placements {
+		color := colors[rand.Intn(len(colors))]
+		symbol := fmt.Sprintf("%s%v%s", color, presentChars[rand.Intn(len(presentChars))], reset)
 
 		for _, gridPos := range placement.GridPositions {
 			row := gridPos / width
